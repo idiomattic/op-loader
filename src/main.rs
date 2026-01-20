@@ -1,18 +1,22 @@
-use std::io;
+mod app;
+mod event;
 
 use ratatui::DefaultTerminal;
+use std::io;
+
+use app::App;
 
 fn run_app(terminal: &mut DefaultTerminal) -> io::Result<()> {
     let mut app = App::new();
 
     while !app.should_quit {
-        terminal.draw(|frame| ui::render(frame, &mut app))?;
+        terminal.draw(|frame| app.draw(frame))?;
         event::handle_events(&mut app)?;
     }
 
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() -> io::Result<()> {
     ratatui::run(|terminal| run_app(terminal))
 }
