@@ -122,6 +122,7 @@ pub struct VaultItem {
 }
 
 pub enum FocusedPanel {
-    VaultList,
     AccountList,
+    VaultList,
+    VaultItemList,
 }
