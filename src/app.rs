@@ -50,7 +50,7 @@ impl App {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("op vault list failed: {}", stderr),
+                format!("`op vault list` failed: {}", stderr),
             ));
         }
 
@@ -75,7 +75,7 @@ impl App {
             let stderr = String::from_utf8_lossy(&output.stdout);
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("op account list failed: {}", stderr),
+                format!("`op account list` failed: {}", stderr),
             ));
         }
 
@@ -86,6 +86,47 @@ impl App {
 
         if !self.accounts.is_empty() {
             self.account_list_state.select(Some(0));
+        }
+
+        Ok(())
+    }
+
+    pub fn load_vault_items(&mut self) -> io::Result<()> {
+        if self.selected_account_idx.is_none() || self.selected_vault_idx.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("cannot list vault items when account/vault are not selected"),
+            ));
+        }
+
+        let selected_vault_name = "";
+
+        let output = Command::new("op")
+            .args([
+                "item",
+                "list",
+                "--vault",
+                selected_vault_name,
+                "--format",
+                "json",
+            ])
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stdout);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("`op item list` failed: {}", stderr),
+            ));
+        }
+
+        let vault_items: Vec<VaultItem> = serde_json::from_slice(&output.stdout)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.vault_items = vault_items;
+
+        if !self.vault_items.is_empty() {
+            self.vault_item_list_state.select(Some(0));
         }
 
         Ok(())
