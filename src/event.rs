@@ -17,6 +17,12 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             app.should_quit = true;
         }
+        KeyCode::Char('0') => {
+            app.focused_panel = FocusedPanel::AccountList;
+        }
+        KeyCode::Char('1') => {
+            app.focused_panel = FocusedPanel::VaultList;
+        }
         _ => match app.focused_panel {
             FocusedPanel::VaultList => handle_vault_list_input(app, key),
             FocusedPanel::AccountList => {}
