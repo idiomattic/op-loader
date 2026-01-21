@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let right_pane_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
+        .constraints([Constraint::Fill(1)])
         .split(outer_layout[1]);
 
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
