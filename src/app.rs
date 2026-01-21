@@ -1,4 +1,4 @@
-use ratatui::widgets::ListState;
+use ratatui::widgets::{List, ListState};
 use serde::Deserialize;
 use std::{io, process::Command};
 
@@ -6,8 +6,11 @@ pub struct App {
     pub should_quit: bool,
     pub focused_panel: FocusedPanel,
 
-    pub vaults: Vec<Vault>,
+    pub accounts: Vec<Account>,
+    pub account_list_state: ListState,
+    pub selected_account_idx: Option<usize>,
 
+    pub vaults: Vec<Vault>,
     pub vault_list_state: ListState,
     pub selected_vault_idx: Option<usize>,
 }
@@ -20,6 +23,9 @@ impl App {
             vaults: Vec::new(),
             vault_list_state: ListState::default(),
             selected_vault_idx: None,
+            accounts: Vec::new(),
+            account_list_state: ListState::default(),
+            selected_account_idx: None,
         };
 
         app
@@ -55,6 +61,13 @@ impl App {
 pub struct Vault {
     pub id: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Account {
+    pub email: String,
+    pub user_uuid: String,
+    pub account_uuid: String,
 }
 
 pub enum FocusedPanel {
