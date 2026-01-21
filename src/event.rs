@@ -19,6 +19,7 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
         }
         _ => match app.focused_panel {
             FocusedPanel::VaultList => handle_vault_list_input(app, key),
+            FocusedPanel::AccountList => {}
         },
     }
 }

@@ -15,6 +15,11 @@ fn run_app(terminal: &mut DefaultTerminal) -> io::Result<()> {
         return Err(e);
     }
 
+    if let Err(e) = app.load_accounts() {
+        eprintln!("Failed to load accounts: {}", e);
+        return Err(e);
+    }
+
     while !app.should_quit {
         terminal.draw(|frame| ui::render(frame, &mut app))?;
         event::handle_events(&mut app)?;

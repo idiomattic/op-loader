@@ -55,6 +55,31 @@ impl App {
 
         Ok(())
     }
+
+    pub fn load_accounts(&mut self) -> io::Result<()> {
+        let output = Command::new("op")
+            .args(["account", "list", "--format", "json"])
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stdout);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("op account list failed: {}", stderr),
+            ));
+        }
+
+        let accounts: Vec<Account> = serde_json::from_slice(&output.stdout)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.accounts = accounts;
+
+        if !self.accounts.is_empty() {
+            self.account_list_state.select(Some(0));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,4 +97,5 @@ pub struct Account {
 
 pub enum FocusedPanel {
     VaultList,
+    AccountList,
 }
