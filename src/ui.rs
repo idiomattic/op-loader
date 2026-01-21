@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
-    render_list_panel(&VaultItemListPanel, frame, app, right_pane_layout[2]);
+    render_list_panel(&VaultItemListPanel, frame, app, right_pane_layout[0]);
 }
 
 trait ListPanel {
