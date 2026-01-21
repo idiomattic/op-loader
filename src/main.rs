@@ -1,5 +1,6 @@
 mod app;
 mod event;
+mod ui;
 
 use ratatui::DefaultTerminal;
 use std::io;
@@ -10,7 +11,7 @@ fn run_app(terminal: &mut DefaultTerminal) -> io::Result<()> {
     let mut app = App::new();
 
     while !app.should_quit {
-        terminal.draw(|frame| app.draw(frame))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
         event::handle_events(&mut app)?;
     }
 
