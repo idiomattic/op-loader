@@ -66,6 +66,10 @@ impl App {
         Ok(())
     }
 
+    pub fn selected_vault(&self) -> Option<&Vault> {
+        self.selected_vault_idx.and_then(|idx| self.vaults.get(idx))
+    }
+
     pub fn load_accounts(&mut self) -> io::Result<()> {
         let output = Command::new("op")
             .args(["account", "list", "--format", "json"])
@@ -99,7 +103,7 @@ impl App {
             ));
         }
 
-        let selected_vault_name = "";
+        let selected_vault_name = &self.selected_vault().unwrap().name;
 
         let output = Command::new("op")
             .args([
