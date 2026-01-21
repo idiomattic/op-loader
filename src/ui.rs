@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::{Account, App, FocusedPanel, Vault, VaultItem};
+use crate::app::{Account, App, FocusedPanel, ItemField, Vault, VaultItem};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let outer_layout = Layout::default()
@@ -124,11 +124,18 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     render_item_details(frame, app, chunks[1]);
 }
 
-fn render_item_details(frame: &mut Frame, app: &App, area: Rect) {
+fn render_item_details(frame: &mut Frame, app: &mut App, area: Rect) {
+    let is_focused = app.focused_panel == FocusedPanel::VaultItemDetail;
+
     let block = Block::default()
-        .title(" Details ")
+        .title(" [4] Details ")
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded);
+        .border_type(BorderType::Rounded)
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -139,23 +146,42 @@ fn render_item_details(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    let text: String = details
+    let fields: Vec<&ItemField> = details
         .fields
         .iter()
         .filter(|f| f.label != "notesPlain")
-        .map(|f| {
+        .collect();
+
+    let items: Vec<ListItem> = fields
+        .iter()
+        .enumerate()
+        .map(|(idx, f)| {
+            let is_selected = app.selected_field_idx == Some(idx);
             let value = if f.field_type == "CONCEALED" {
                 "********".to_string()
             } else {
                 f.value.clone().unwrap_or_default()
             };
-            format!("{}: {}\n  {}", f.label, value, f.reference)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+            let prefix = if is_selected { "● " } else { "  " };
+            let content = format!("{}{}: {}\n    {}", prefix, f.label, value, f.reference);
 
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+            ListItem::new(content).style(if is_selected {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            })
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(list, inner, &mut app.item_detail_list_state);
 }
 
 fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {

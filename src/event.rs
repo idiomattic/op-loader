@@ -12,6 +12,7 @@ enum NavAction {
     PanelZero,
     PanelOne,
     PanelTwo,
+    PanelFour,
 }
 
 impl NavAction {
@@ -24,6 +25,7 @@ impl NavAction {
             KeyCode::Char('0') => Some(Self::PanelZero),
             KeyCode::Char('1') => Some(Self::PanelOne),
             KeyCode::Char('2') => Some(Self::PanelTwo),
+            KeyCode::Char('4') => Some(Self::PanelFour),
             _ => None,
         }
     }
@@ -45,11 +47,13 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
             NavAction::PanelZero => app.focused_panel = FocusedPanel::AccountList,
             NavAction::PanelOne => app.focused_panel = FocusedPanel::VaultList,
             NavAction::PanelTwo => app.focused_panel = FocusedPanel::VaultItemList,
+            NavAction::PanelFour => app.focused_panel = FocusedPanel::VaultItemDetail,
             nav_action => {
                 let nav: &dyn ListNav = match app.focused_panel {
                     FocusedPanel::AccountList => &AccountListNav,
                     FocusedPanel::VaultList => &VaultListNav,
                     FocusedPanel::VaultItemList => &VaultItemListNav,
+                    FocusedPanel::VaultItemDetail => &VaultItemDetailNav,
                 };
 
                 match nav_action {
@@ -175,8 +179,35 @@ impl ListNav for VaultItemListNav {
                 let item_id = item.id.clone();
                 if let Err(e) = app.load_item_details(&item_id) {
                     app.error_message = Some(e.to_string());
+                } else {
+                    // Reset field selection and move focus to details panel
+                    app.item_detail_list_state.select(Some(0));
+                    app.selected_field_idx = None;
+                    app.focused_panel = FocusedPanel::VaultItemDetail;
                 }
             }
         }
+    }
+}
+
+struct VaultItemDetailNav;
+impl ListNav for VaultItemDetailNav {
+    fn len(&self, app: &App) -> usize {
+        app.selected_item_details
+            .as_ref()
+            .map(|d| d.fields.iter().filter(|f| f.label != "notesPlain").count())
+            .unwrap_or(0)
+    }
+
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.item_detail_list_state
+    }
+
+    fn selected_idx(&self, app: &App) -> Option<usize> {
+        app.selected_field_idx
+    }
+
+    fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
+        app.selected_field_idx = idx;
     }
 }

@@ -22,6 +22,9 @@ pub struct App {
     pub vault_item_list_state: ListState,
     pub selected_vault_item_idx: Option<usize>,
     pub selected_item_details: Option<VaultItemDetails>,
+
+    pub item_detail_list_state: ListState,
+    pub selected_field_idx: Option<usize>,
 }
 
 impl App {
@@ -44,6 +47,9 @@ impl App {
             vault_item_list_state: ListState::default(),
             selected_vault_item_idx: None,
             selected_item_details: None,
+
+            item_detail_list_state: ListState::default(),
+            selected_field_idx: None,
         };
 
         app
@@ -232,4 +238,5 @@ pub enum FocusedPanel {
     AccountList,
     VaultList,
     VaultItemList,
+    VaultItemDetail,
 }
