@@ -21,6 +21,7 @@ pub struct App {
     pub vault_items: Vec<VaultItem>,
     pub vault_item_list_state: ListState,
     pub selected_vault_item_idx: Option<usize>,
+    pub selected_item_details: Option<VaultItemDetails>,
 }
 
 impl App {
@@ -42,6 +43,7 @@ impl App {
             vault_items: Vec::new(),
             vault_item_list_state: ListState::default(),
             selected_vault_item_idx: None,
+            selected_item_details: None,
         };
 
         app
@@ -139,6 +141,31 @@ impl App {
 
         Ok(())
     }
+
+    pub fn load_item_details(&mut self, item_id: &str) -> io::Result<()> {
+        let vault_name = self.selected_vault().unwrap().name.clone();
+
+        let stdout = self.run_op_command(&[
+            "item",
+            "get",
+            item_id,
+            "--vault",
+            &vault_name,
+            "--format",
+            "json",
+        ])?;
+
+        let details: VaultItemDetails = serde_json::from_slice(&stdout)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.command_log.log_success(
+            format!("op item get {}", item_id),
+            Some(details.fields.len()),
+        );
+
+        self.selected_item_details = Some(details);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +199,32 @@ pub struct VaultItem {
     pub additional_information: Option<String>,
     #[serde(default)]
     pub urls: Vec<ItemUrl>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VaultItemDetails {
+    pub id: String,
+    pub title: String,
+    pub category: String,
+    #[serde(default)]
+    pub fields: Vec<ItemField>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ItemField {
+    pub label: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub reference: String,
+    #[serde(default)]
+    pub section: Option<FieldSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FieldSection {
+    pub label: String,
 }
 
 #[derive(PartialEq)]
