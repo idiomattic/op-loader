@@ -153,10 +153,12 @@ pub struct Account {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct ItemUrl {
-    label: String,
-    primary: bool,
-    href: String,
+pub struct ItemUrl {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub primary: bool,
+    pub href: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,7 +166,9 @@ pub struct VaultItem {
     pub id: String,
     pub title: String,
     pub category: String,
-    pub additional_information: String,
+    #[serde(default)]
+    pub additional_information: Option<String>,
+    #[serde(default)]
     pub urls: Vec<ItemUrl>,
 }
 
