@@ -20,7 +20,11 @@ fn run_app(terminal: &mut DefaultTerminal) -> io::Result<()> {
         return Err(e);
     }
 
-    if app.selected_account_idx.is_some() || app.selected_vault_idx.is_some() {
+    if !app.accounts.is_empty() {
+        app.selected_account_idx = Some(0);
+    }
+
+    if app.selected_account_idx.is_some() && app.selected_vault_idx.is_some() {
         if let Err(e) = app.load_vault_items() {
             eprintln!("Failed to load vault items: {}", e);
             return Err(e);
