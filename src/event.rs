@@ -23,4 +23,30 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
     }
 }
 
-fn handle_vault_list_input(app: &mut App, key: KeyEvent) {}
+fn handle_vault_list_input(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            if !app.vaults.is_empty() {
+                let idx = app.vault_list_state.selected().unwrap_or(0);
+                let new_idx = if idx == 0 {
+                    app.vaults.len() - 1
+                } else {
+                    idx - 1
+                };
+                app.vault_list_state.select(Some(new_idx));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            if !app.vaults.is_empty() {
+                let idx = app.vault_list_state.selected().unwrap_or(0);
+                let new_idx = if idx == app.vaults.len() - 1 {
+                    0
+                } else {
+                    idx + 1
+                };
+                app.vault_list_state.select(Some(new_idx));
+            }
+        }
+        _ => {}
+    }
+}
