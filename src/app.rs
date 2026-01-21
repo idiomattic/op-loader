@@ -1,11 +1,12 @@
-use ratatui::widgets::{List, ListState};
+use ratatui::widgets::ListState;
 use serde::Deserialize;
-use std::{io, process::Command};
+use std::{io, process::Command, time::Instant};
 
 pub struct App {
     pub should_quit: bool,
     pub focused_panel: FocusedPanel,
     pub error_message: Option<String>,
+    pub command_log: CommandLog,
 
     pub accounts: Vec<Account>,
     pub account_list_state: ListState,
@@ -26,6 +27,7 @@ impl App {
             should_quit: false,
             focused_panel: FocusedPanel::VaultList,
             error_message: None,
+            command_log: CommandLog::default(),
 
             vaults: Vec::new(),
             vault_list_state: ListState::default(),
@@ -43,21 +45,31 @@ impl App {
         app
     }
 
-    pub fn load_vaults(&mut self) -> io::Result<()> {
-        let output = Command::new("op")
-            .args(["vault", "list", "--format", "json"])
-            .output()?;
+    fn run_op_command(&mut self, args: &[&str]) -> io::Result<Vec<u8>> {
+        let cmd_str = format!("op {}", args.join(" "));
+
+        let output = Command::new("op").args(args).output()?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            self.command_log.log_failure(&cmd_str, &stderr);
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("`op vault list` failed: {}", stderr),
+                format!("`{}` failed: {}", cmd_str, stderr),
             ));
         }
 
-        let vaults: Vec<Vault> = serde_json::from_slice(&output.stdout)
+        Ok(output.stdout)
+    }
+
+    pub fn load_vaults(&mut self) -> io::Result<()> {
+        let stdout = self.run_op_command(&["vault", "list", "--format", "json"])?;
+
+        let vaults: Vec<Vault> = serde_json::from_slice(&stdout)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.command_log
+            .log_success("op vault list", Some(vaults.len()));
 
         self.vaults = vaults;
 
@@ -73,20 +85,13 @@ impl App {
     }
 
     pub fn load_accounts(&mut self) -> io::Result<()> {
-        let output = Command::new("op")
-            .args(["account", "list", "--format", "json"])
-            .output()?;
+        let stdout = self.run_op_command(&["account", "list", "--format", "json"])?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stdout);
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("`op account list` failed: {}", stderr),
-            ));
-        }
-
-        let accounts: Vec<Account> = serde_json::from_slice(&output.stdout)
+        let accounts: Vec<Account> = serde_json::from_slice(&stdout)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.command_log
+            .log_success("op account list", Some(accounts.len()));
 
         self.accounts = accounts;
 
@@ -105,29 +110,24 @@ impl App {
             ));
         }
 
-        let selected_vault_name = &self.selected_vault().unwrap().name;
+        let selected_vault_name = &self.selected_vault().unwrap().name.clone();
 
-        let output = Command::new("op")
-            .args([
-                "item",
-                "list",
-                "--vault",
-                selected_vault_name,
-                "--format",
-                "json",
-            ])
-            .output()?;
+        let stdout = self.run_op_command(&[
+            "item",
+            "list",
+            "--vault",
+            selected_vault_name,
+            "--format",
+            "json",
+        ])?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stdout);
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("`op item list` failed: {}", stderr),
-            ));
-        }
-
-        let vault_items: Vec<VaultItem> = serde_json::from_slice(&output.stdout)
+        let vault_items: Vec<VaultItem> = serde_json::from_slice(&stdout)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.command_log.log_success(
+            format!("op item list --vault {}", selected_vault_name),
+            Some(vault_items.len()),
+        );
 
         self.vault_items = vault_items;
 
@@ -136,6 +136,77 @@ impl App {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct CommandLog {
+    pub entries: Vec<CommandLogEntry>,
+}
+
+pub struct CommandLogEntry {
+    pub command: String,
+    pub status: CommandStatus,
+    pub timestamp: Instant,
+}
+
+impl CommandLogEntry {
+    pub fn display(&self) -> String {
+        match &self.status {
+            CommandStatus::Success { item_count } => match item_count {
+                Some(n) => format!("✓ {} ({} items)", self.command, n),
+                None => format!("✓ {}", self.command),
+            },
+            CommandStatus::Failed { stderr } => {
+                let first_line = stderr.lines().next().unwrap_or("");
+                format!("✗ {}: {}", self.command, first_line)
+            }
+        }
+    }
+}
+
+pub enum CommandStatus {
+    Success { item_count: Option<usize> },
+    Failed { stderr: String },
+}
+
+impl CommandLog {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn log_success(&mut self, command: impl Into<String>, item_count: Option<usize>) {
+        self.entries.push(CommandLogEntry {
+            command: command.into(),
+            status: CommandStatus::Success { item_count },
+            timestamp: Instant::now(),
+        });
+        self.trim();
+    }
+
+    pub fn log_failure(&mut self, command: impl Into<String>, stderr: impl Into<String>) {
+        self.entries.push(CommandLogEntry {
+            command: command.into(),
+            status: CommandStatus::Failed {
+                stderr: stderr.into(),
+            },
+            timestamp: Instant::now(),
+        });
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        const MAX_ENTRIES: usize = 50;
+        if self.entries.len() > MAX_ENTRIES {
+            self.entries.drain(0..self.entries.len() - MAX_ENTRIES);
+        }
+    }
+
+    pub fn recent(&self, n: usize) -> &[CommandLogEntry] {
+        let start = self.entries.len().saturating_sub(n);
+        &self.entries[start..]
     }
 }
 
