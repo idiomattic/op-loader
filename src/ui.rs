@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
 use crate::app::{Account, App, FocusedPanel, Vault, VaultItem};
@@ -51,6 +51,7 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
     let block = Block::default()
         .title(panel.title())
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(if is_focused {
             Style::default().fg(Color::Cyan)
         } else {
