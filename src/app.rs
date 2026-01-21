@@ -5,6 +5,7 @@ use std::{io, process::Command};
 pub struct App {
     pub should_quit: bool,
     pub focused_panel: FocusedPanel,
+    pub error_message: Option<String>,
 
     pub accounts: Vec<Account>,
     pub account_list_state: ListState,
@@ -24,6 +25,7 @@ impl App {
         let app = Self {
             should_quit: false,
             focused_panel: FocusedPanel::VaultList,
+            error_message: None,
 
             vaults: Vec::new(),
             vault_list_state: ListState::default(),

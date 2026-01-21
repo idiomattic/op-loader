@@ -135,6 +135,15 @@ impl ListNav for VaultListNav {
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
         app.selected_vault_idx = idx;
     }
+
+    fn on_select(&self, app: &mut App) {
+        let idx = self.list_state(app).selected();
+        self.set_selected_idx(app, idx);
+
+        if let Err(e) = app.load_vault_items() {
+            app.error_message = Some(e.to_string());
+        }
+    }
 }
 
 struct VaultItemListNav;
