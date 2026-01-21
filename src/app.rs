@@ -12,6 +12,7 @@ pub struct App {
     pub vaults: Vec<Vault>,
 
     pub vault_list_state: ListState,
+    pub selected_vault_idx: Option<usize>,
 }
 
 impl App {
@@ -20,6 +21,7 @@ impl App {
             should_quit: false,
             vaults: Vec::new(),
             vault_list_state: ListState::default(),
+            selected_vault_idx: None,
         };
         app
     }
