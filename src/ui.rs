@@ -124,3 +124,25 @@ impl ListPanel for VaultListPanel {
         app.selected_vault_idx
     }
 }
+
+struct VaultItemListPanel;
+impl ListPanel for VaultItemListPanel {
+    fn title(&self) -> &str {
+        " [2] Items "
+    }
+    fn focus_variant(&self) -> FocusedPanel {
+        FocusedPanel::VaultItemList
+    }
+    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
+        app.vault_items.iter().map(|vi| vi.title.as_str()).collect()
+    }
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.vault_item_list_state
+    }
+    fn selected_color(&self) -> Color {
+        Color::Cyan
+    }
+    fn selected_idx(&self, app: &App) -> Option<usize> {
+        app.selected_vault_item_idx
+    }
+}
