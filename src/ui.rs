@@ -8,12 +8,17 @@ use ratatui::{
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
+    let outer_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(frame.area());
 
-    render_vault_list(frame, app, chunks[0]);
+    let left_pane_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
+        .split(outer_layout[0]);
+
+    render_vault_list(frame, app, left_pane_layout[1]);
 }
 
 fn render_vault_list(frame: &mut Frame, app: &mut App, area: Rect) {
