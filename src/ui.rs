@@ -26,7 +26,7 @@ fn render_account_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = matches!(app.focused_panel, FocusedPanel::AccountList);
 
     let block = Block::default()
-        .title(" Accounts ")
+        .title(" [0] Accounts ")
         .borders(Borders::ALL)
         .border_style(if is_focused {
             Style::default().fg(Color::Cyan)
@@ -67,7 +67,7 @@ fn render_vault_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = matches!(app.focused_panel, FocusedPanel::VaultList);
 
     let block = Block::default()
-        .title(" Vaults ")
+        .title(" [1] Vaults ")
         .borders(Borders::ALL)
         .border_style(if is_focused {
             Style::default().fg(Color::Cyan)
