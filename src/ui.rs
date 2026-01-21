@@ -20,8 +20,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
         .split(outer_layout[0]);
 
-    render_account_list(frame, app, left_pane_layout[0]);
-    render_vault_list(frame, app, left_pane_layout[1]);
+    render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
+    render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
 }
 
 trait ListPanel {
@@ -39,8 +39,7 @@ trait ListPanel {
 }
 
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = std::mem::discriminant(&app.focused_panel)
-        == std::mem::discriminant(&panel.focus_variant());
+    let is_focused = discriminant(&app.focused_panel) == discriminant(&panel.focus_variant());
     let selected_idx = panel.selected_idx(app);
     let selected_color = panel.selected_color();
 
@@ -82,84 +81,48 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
     frame.render_stateful_widget(list, area, panel.list_state(app));
 }
 
-fn render_account_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = matches!(app.focused_panel, FocusedPanel::AccountList);
+struct AccountListPanel;
 
-    let block = Block::default()
-        .title(" [0] Accounts ")
-        .borders(Borders::ALL)
-        .border_style(if is_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default()
-        });
-
-    let items: Vec<ListItem> = app
-        .accounts
-        .iter()
-        .enumerate()
-        .map(|(idx, account)| {
-            let is_selected = app.selected_account_idx == Some(idx);
-            let prefix = if is_selected { "● " } else { "  " };
-            let content = format!("{}{}", prefix, account.email);
-
-            ListItem::new(content).style(if is_selected {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default()
-            })
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("> ");
-
-    frame.render_stateful_widget(list, area, &mut app.account_list_state);
+impl ListPanel for AccountListPanel {
+    fn title(&self) -> &str {
+        " [0] Accounts "
+    }
+    fn focus_variant(&self) -> FocusedPanel {
+        FocusedPanel::AccountList
+    }
+    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
+        app.accounts.iter().map(|a| a.email.as_str()).collect()
+    }
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.account_list_state
+    }
+    fn selected_color(&self) -> Color {
+        Color::Cyan
+    }
+    fn selected_idx(&self, app: &App) -> Option<usize> {
+        app.selected_account_idx
+    }
 }
 
-fn render_vault_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = matches!(app.focused_panel, FocusedPanel::VaultList);
+struct VaultListPanel;
 
-    let block = Block::default()
-        .title(" [1] Vaults ")
-        .borders(Borders::ALL)
-        .border_style(if is_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default()
-        });
-
-    let items: Vec<ListItem> = app
-        .vaults
-        .iter()
-        .enumerate()
-        .map(|(idx, vault)| {
-            let is_selected = app.selected_vault_idx == Some(idx);
-            let prefix = if is_selected { "● " } else { "  " };
-            let content = format!("{}{}", prefix, vault.name);
-
-            ListItem::new(content).style(if is_selected {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
-            })
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("> ");
-
-    frame.render_stateful_widget(list, area, &mut app.vault_list_state);
+impl ListPanel for VaultListPanel {
+    fn title(&self) -> &str {
+        " [1] Vaults "
+    }
+    fn focus_variant(&self) -> FocusedPanel {
+        FocusedPanel::VaultList
+    }
+    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
+        app.vaults.iter().map(|v| v.name.as_str()).collect()
+    }
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.vault_list_state
+    }
+    fn selected_color(&self) -> Color {
+        Color::Cyan
+    }
+    fn selected_idx(&self, app: &App) -> Option<usize> {
+        app.selected_vault_idx
+    }
 }
