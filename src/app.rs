@@ -23,6 +23,24 @@ impl App {
             vault_list_state: ListState::default(),
             selected_vault_idx: None,
         };
+
+        app.vaults = vec![
+            Vault {
+                id: "vault1".to_string(),
+                name: "Personal".to_string(),
+            },
+            Vault {
+                id: "vault2".to_string(),
+                name: "Work".to_string(),
+            },
+            Vault {
+                id: "vault3".to_string(),
+                name: "Shared".to_string(),
+            },
+        ];
+
+        app.vault_list_state.select(Some(0));
+
         app
     }
 }
