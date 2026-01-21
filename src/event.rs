@@ -165,4 +165,18 @@ impl ListNav for VaultItemListNav {
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
         app.selected_vault_item_idx = idx;
     }
+
+    fn on_select(&self, app: &mut App) {
+        let idx = self.list_state(app).selected();
+        self.set_selected_idx(app, idx);
+
+        if let Some(idx) = idx {
+            if let Some(item) = app.vault_items.get(idx) {
+                let item_id = item.id.clone();
+                if let Err(e) = app.load_item_details(&item_id) {
+                    app.error_message = Some(e.to_string());
+                }
+            }
+        }
+    }
 }
