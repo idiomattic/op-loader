@@ -1,5 +1,3 @@
-use std::mem::discriminant;
-
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -39,7 +37,7 @@ trait ListPanel {
 }
 
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = discriminant(&app.focused_panel) == discriminant(&panel.focus_variant());
+    let is_focused = &app.focused_panel == &panel.focus_variant();
     let selected_idx = panel.selected_idx(app);
     let selected_color = panel.selected_color();
 

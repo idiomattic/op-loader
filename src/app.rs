@@ -166,6 +166,7 @@ pub struct VaultItem {
     pub urls: Vec<ItemUrl>,
 }
 
+#[derive(PartialEq)]
 pub enum FocusedPanel {
     AccountList,
     VaultList,
