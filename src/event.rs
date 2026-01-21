@@ -143,6 +143,8 @@ impl ListNav for VaultListNav {
         if let Err(e) = app.load_vault_items() {
             app.error_message = Some(e.to_string());
         }
+
+        app.focused_panel = FocusedPanel::VaultItemList;
     }
 }
 
