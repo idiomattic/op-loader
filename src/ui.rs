@@ -18,8 +18,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
         .split(outer_layout[0]);
 
+    let right_pane_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
+        .split(outer_layout[1]);
+
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
+    render_list_panel(&VaultItemListPanel, frame, app, right_pane_layout[2]);
 }
 
 trait ListPanel {
