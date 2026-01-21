@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use crate::app::{Account, App, FocusedPanel, Vault, VaultItem};
@@ -15,7 +15,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let left_pane_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(10),
+            Constraint::Length(10),
+        ])
         .split(outer_layout[0]);
 
     let right_pane_layout = Layout::default()
@@ -25,6 +29,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
+    render_command_log(frame, app, left_pane_layout[2]);
     render_list_panel(&VaultItemListPanel, frame, app, right_pane_layout[0]);
 }
 
@@ -85,6 +90,27 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .highlight_symbol("> ");
 
     frame.render_stateful_widget(list, area, panel.list_state(app));
+}
+
+fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" Command Log ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    let visible_lines = area.height.saturating_sub(2) as usize;
+
+    let text: String = app
+        .command_log
+        .recent(visible_lines)
+        .iter()
+        .map(|entry| entry.display())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
+
+    frame.render_widget(paragraph, area);
 }
 
 struct AccountListPanel;

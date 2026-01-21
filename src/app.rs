@@ -1,6 +1,6 @@
 use ratatui::widgets::ListState;
 use serde::Deserialize;
-use std::{io, process::Command, time::Instant};
+use std::{io, process::Command};
 
 pub struct App {
     pub should_quit: bool,
@@ -147,7 +147,6 @@ pub struct CommandLog {
 pub struct CommandLogEntry {
     pub command: String,
     pub status: CommandStatus,
-    pub timestamp: Instant,
 }
 
 impl CommandLogEntry {
@@ -171,17 +170,10 @@ pub enum CommandStatus {
 }
 
 impl CommandLog {
-    pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-
     pub fn log_success(&mut self, command: impl Into<String>, item_count: Option<usize>) {
         self.entries.push(CommandLogEntry {
             command: command.into(),
             status: CommandStatus::Success { item_count },
-            timestamp: Instant::now(),
         });
         self.trim();
     }
@@ -192,7 +184,6 @@ impl CommandLog {
             status: CommandStatus::Failed {
                 stderr: stderr.into(),
             },
-            timestamp: Instant::now(),
         });
         self.trim();
     }
