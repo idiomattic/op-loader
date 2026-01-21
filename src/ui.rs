@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
     render_command_log(frame, app, left_pane_layout[2]);
-    render_list_panel(&VaultItemListPanel, frame, app, right_pane_layout[0]);
+    render_vault_item_panel(frame, app, right_pane_layout[0]);
 }
 
 trait ListPanel {
@@ -50,8 +50,6 @@ trait ListPanel {
 
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = &app.focused_panel == &panel.focus_variant();
-    let selected_idx = panel.selected_idx(app);
-    let selected_color = panel.selected_color();
 
     let block = Block::default()
         .title(panel.title())
@@ -62,6 +60,16 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         } else {
             Style::default()
         });
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    render_list_inner(panel, frame, app, inner_area);
+}
+
+fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
+    let selected_idx = panel.selected_idx(app);
+    let selected_color = panel.selected_color();
 
     let items: Vec<ListItem> = panel
         .items(app)
@@ -81,7 +89,6 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .collect();
 
     let list = List::new(items)
-        .block(block)
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -90,6 +97,25 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .highlight_symbol("> ");
 
     frame.render_stateful_widget(list, area, panel.list_state(app));
+}
+
+fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let is_focused = app.focused_panel == FocusedPanel::VaultItemList;
+
+    let block = Block::default()
+        .title(" [2] Items ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    render_list_inner(&VaultItemListPanel, frame, app, inner);
 }
 
 fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
