@@ -115,7 +115,47 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    render_list_inner(&VaultItemListPanel, frame, app, inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
+
+    render_list_inner(&VaultItemListPanel, frame, app, chunks[0]);
+    render_item_details(frame, app, chunks[1]);
+}
+
+fn render_item_details(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" Details ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let Some(details) = &app.selected_item_details else {
+        let empty = Paragraph::new("Select an item and press Enter");
+        frame.render_widget(empty, inner);
+        return;
+    };
+
+    let text: String = details
+        .fields
+        .iter()
+        .filter(|f| f.label != "notesPlain")
+        .map(|f| {
+            let value = if f.field_type == "CONCEALED" {
+                "********".to_string()
+            } else {
+                f.value.clone().unwrap_or_default()
+            };
+            format!("{}: {}\n  {}", f.label, value, f.reference)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
