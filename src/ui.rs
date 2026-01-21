@@ -1,3 +1,5 @@
+use std::mem::discriminant;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -34,6 +36,50 @@ trait ListPanel {
     fn selected_idx(&self, app: &App) -> Option<usize>;
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
+}
+
+fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
+    let is_focused = std::mem::discriminant(&app.focused_panel)
+        == std::mem::discriminant(&panel.focus_variant());
+    let selected_idx = panel.selected_idx(app);
+    let selected_color = panel.selected_color();
+
+    let block = Block::default()
+        .title(panel.title())
+        .borders(Borders::ALL)
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
+
+    let items: Vec<ListItem> = panel
+        .items(app)
+        .into_iter()
+        .enumerate()
+        .map(|(idx, text)| {
+            let is_selected = selected_idx == Some(idx);
+            let prefix = if is_selected { "● " } else { "  " };
+            let content = format!("{}{}", prefix, text);
+
+            ListItem::new(content).style(if is_selected {
+                Style::default().fg(selected_color)
+            } else {
+                Style::default()
+            })
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(list, area, panel.list_state(app));
 }
 
 fn render_account_list(frame: &mut Frame, app: &mut App, area: Rect) {
