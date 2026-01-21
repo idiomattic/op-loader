@@ -47,6 +47,10 @@ fn handle_vault_list_input(app: &mut App, key: KeyEvent) {
                 app.vault_list_state.select(Some(new_idx));
             }
         }
+        KeyCode::Enter => {
+            let idx = app.vault_list_state.selected().unwrap_or(0);
+            app.selected_vault_idx = Some(idx);
+        }
         _ => {}
     }
 }
