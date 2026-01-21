@@ -13,6 +13,10 @@ pub struct App {
     pub vaults: Vec<Vault>,
     pub vault_list_state: ListState,
     pub selected_vault_idx: Option<usize>,
+
+    pub vault_items: Vec<VaultItem>,
+    pub vault_item_list_state: ListState,
+    pub selected_vault_item_idx: Option<usize>,
 }
 
 impl App {
@@ -20,12 +24,18 @@ impl App {
         let app = Self {
             should_quit: false,
             focused_panel: FocusedPanel::VaultList,
+
             vaults: Vec::new(),
             vault_list_state: ListState::default(),
             selected_vault_idx: None,
+
             accounts: Vec::new(),
             account_list_state: ListState::default(),
             selected_account_idx: None,
+
+            vault_items: Vec::new(),
+            vault_item_list_state: ListState::default(),
+            selected_vault_item_idx: None,
         };
 
         app
@@ -93,6 +103,22 @@ pub struct Account {
     pub email: String,
     pub user_uuid: String,
     pub account_uuid: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ItemUrl {
+    label: String,
+    primary: bool,
+    href: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VaultItem {
+    pub id: String,
+    pub title: String,
+    pub category: String,
+    pub additional_information: String,
+    pub urls: Vec<ItemUrl>,
 }
 
 pub enum FocusedPanel {
