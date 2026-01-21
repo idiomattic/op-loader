@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
-use crate::app::{App, FocusedPanel};
+use crate::app::{Account, App, FocusedPanel, Vault, VaultItem};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let outer_layout = Layout::default()
@@ -23,16 +23,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 trait ListPanel {
+    type Item;
+
     fn title(&self) -> &str;
-
     fn focus_variant(&self) -> FocusedPanel;
-
     fn selected_color(&self) -> Color;
 
-    fn items<'a>(&self, app: &'a App) -> Vec<&'a str>;
+    fn items<'a>(&self, app: &'a App) -> &'a [Self::Item];
+
+    fn display_item(&self, item: &Self::Item) -> String;
 
     fn selected_idx(&self, app: &App) -> Option<usize>;
-
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
 }
 
@@ -54,10 +55,10 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .items(app)
         .into_iter()
         .enumerate()
-        .map(|(idx, text)| {
+        .map(|(idx, item)| {
             let is_selected = selected_idx == Some(idx);
             let prefix = if is_selected { "● " } else { "  " };
-            let content = format!("{}{}", prefix, text);
+            let content = format!("{}{}", prefix, panel.display_item(item));
 
             ListItem::new(content).style(if is_selected {
                 Style::default().fg(selected_color)
@@ -82,14 +83,19 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
 struct AccountListPanel;
 
 impl ListPanel for AccountListPanel {
+    type Item = Account;
+
     fn title(&self) -> &str {
         " [0] Accounts "
     }
     fn focus_variant(&self) -> FocusedPanel {
         FocusedPanel::AccountList
     }
-    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
-        app.accounts.iter().map(|a| a.email.as_str()).collect()
+    fn items<'a>(&self, app: &'a App) -> &'a [Account] {
+        &app.accounts
+    }
+    fn display_item(&self, item: &Self::Item) -> String {
+        item.email.clone()
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.account_list_state
@@ -105,14 +111,19 @@ impl ListPanel for AccountListPanel {
 struct VaultListPanel;
 
 impl ListPanel for VaultListPanel {
+    type Item = Vault;
+
     fn title(&self) -> &str {
         " [1] Vaults "
     }
     fn focus_variant(&self) -> FocusedPanel {
         FocusedPanel::VaultList
     }
-    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
-        app.vaults.iter().map(|v| v.name.as_str()).collect()
+    fn items<'a>(&self, app: &'a App) -> &'a [Vault] {
+        &app.vaults
+    }
+    fn display_item(&self, item: &Self::Item) -> String {
+        item.name.clone()
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_list_state
@@ -127,14 +138,19 @@ impl ListPanel for VaultListPanel {
 
 struct VaultItemListPanel;
 impl ListPanel for VaultItemListPanel {
+    type Item = VaultItem;
+
     fn title(&self) -> &str {
         " [2] Items "
     }
     fn focus_variant(&self) -> FocusedPanel {
         FocusedPanel::VaultItemList
     }
-    fn items<'a>(&self, app: &'a App) -> Vec<&'a str> {
-        app.vault_items.iter().map(|vi| vi.title.as_str()).collect()
+    fn items<'a>(&self, app: &'a App) -> &'a [VaultItem] {
+        &app.vault_items
+    }
+    fn display_item(&self, item: &Self::Item) -> String {
+        item.title.clone()
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_item_list_state
