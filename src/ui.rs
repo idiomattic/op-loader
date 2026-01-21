@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, ListState},
 };
 
 use crate::app::{App, FocusedPanel};
@@ -20,6 +20,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_account_list(frame, app, left_pane_layout[0]);
     render_vault_list(frame, app, left_pane_layout[1]);
+}
+
+trait ListPanel {
+    fn title(&self) -> &str;
+
+    fn focus_variant(&self) -> FocusedPanel;
+
+    fn selected_color(&self) -> Color;
+
+    fn items<'a>(&self, app: &'a App) -> Vec<&'a str>;
+
+    fn selected_idx(&self, app: &App) -> Option<usize>;
+
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
 }
 
 fn render_account_list(frame: &mut Frame, app: &mut App, area: Rect) {
