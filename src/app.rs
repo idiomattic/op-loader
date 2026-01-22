@@ -1,23 +1,21 @@
+use anyhow::{Context, Result};
 use confy;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
-use std::{io, process::Command};
+use std::{collections::HashMap, io, process::Command};
 
 use crate::command_log::CommandLog;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct InjectableVar {
-    var_name: String,
-    op_reference: String,
-}
-#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
-    inject_vars: Vec<InjectableVar>,
+    inject_vars: HashMap<String, String>,
 }
 
 pub struct App {
+    pub config: Option<OpLoadConfig>,
+
     pub should_quit: bool,
     pub focused_panel: FocusedPanel,
     pub error_message: Option<String>,
@@ -51,6 +49,8 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let app = Self {
+            config: None,
+
             should_quit: false,
             focused_panel: FocusedPanel::VaultList,
             error_message: None,
@@ -82,6 +82,18 @@ impl App {
         };
 
         app
+    }
+
+    fn load_config(&mut self, config_path: Option<&std::path::Path>) -> Result<()> {
+        let config: OpLoadConfig = if let Some(path) = config_path {
+            confy::load_path(path).context("Failed to load configuration")?
+        } else {
+            confy::load("op_loader", None).context("Failed to load configuration")?
+        };
+
+        self.config = Some(config);
+
+        Ok(())
     }
 
     fn run_op_command(&mut self, args: &[&str]) -> io::Result<Vec<u8>> {
