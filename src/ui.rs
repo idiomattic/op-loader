@@ -165,7 +165,7 @@ fn render_search_box(frame: &mut Frame, app: &App, area: Rect) {
     let is_active = app.search_active;
 
     let block = Block::default()
-        .title(" Search ")
+        .title(" [/] Search ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if is_active {

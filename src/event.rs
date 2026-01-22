@@ -65,7 +65,10 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    if key.code == KeyCode::Char('/') && app.focused_panel == FocusedPanel::VaultItemList {
+    if key.code == KeyCode::Char('/')
+        && (app.focused_panel == FocusedPanel::VaultItemList
+            || app.focused_panel == FocusedPanel::VaultItemDetail)
+    {
         app.search_active = true;
         return;
     }
