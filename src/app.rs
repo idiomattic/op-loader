@@ -269,6 +269,7 @@ impl App {
         self.modal_open = false;
         self.modal_env_var_name.clear();
         self.modal_field_reference = None;
+        self.error_message = None;
     }
 
     pub fn modal_selected_field(&self) -> Option<&ItemField> {

@@ -68,10 +68,12 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Backspace => {
                 app.modal_env_var_name.pop();
+                app.error_message = None;
             }
             KeyCode::Char(c) => {
                 if c.is_ascii_alphanumeric() || c == '_' {
                     app.modal_env_var_name.push(c.to_ascii_uppercase());
+                    app.error_message = None;
                 }
             }
             _ => {}

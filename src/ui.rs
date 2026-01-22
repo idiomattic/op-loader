@@ -287,8 +287,9 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
 fn render_modal(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    // Content: field info (5) + spacer (1) + input (3) + error (1) + help (1) = 11, plus border (2) = 13
     let modal_width = area.width * 60 / 100;
-    let modal_height = 12_u16.min(area.height - 4);
+    let modal_height = 13_u16.min(area.height - 4);
     let modal_x = (area.width - modal_width) / 2;
     let modal_y = (area.height - modal_height) / 2;
 
@@ -311,6 +312,7 @@ fn render_modal(frame: &mut Frame, app: &App) {
             Constraint::Length(5), // field info
             Constraint::Length(1), // spacer
             Constraint::Length(3), // env var input
+            Constraint::Length(1), // error message
             Constraint::Length(1), // help text
         ])
         .split(inner);
@@ -344,10 +346,17 @@ fn render_modal(frame: &mut Frame, app: &App) {
     let input = Paragraph::new(input_text);
     frame.render_widget(input, input_inner);
 
+    if let Some(ref error) = app.error_message {
+        let error_text = Paragraph::new(error.as_str())
+            .style(Style::default().fg(Color::Red))
+            .alignment(Alignment::Center);
+        frame.render_widget(error_text, chunks[3]);
+    }
+
     let help = Paragraph::new("Enter: Save  |  Esc: Cancel")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[3]);
+    frame.render_widget(help, chunks[4]);
 }
 
 struct AccountListPanel;
