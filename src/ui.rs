@@ -118,8 +118,8 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(40),
-            Constraint::Percentage(10), // search box
+            Constraint::Fill(1),
+            Constraint::Length(3),
             Constraint::Percentage(50),
         ])
         .split(inner);
