@@ -1,10 +1,21 @@
+use confy;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{io, process::Command};
 
 use crate::command_log::CommandLog;
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct InjectableVar {
+    var_name: String,
+    op_reference: String,
+}
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct OpLoadConfig {
+    inject_vars: Vec<InjectableVar>,
+}
 
 pub struct App {
     pub should_quit: bool,
