@@ -31,6 +31,10 @@ pub struct App {
     pub search_query: String,
     pub search_active: bool,
     pub filtered_item_indices: Vec<usize>,
+
+    pub modal_open: bool,
+    pub modal_env_var_name: String,
+    pub modal_field_reference: Option<String>,
 }
 
 impl App {
@@ -60,6 +64,10 @@ impl App {
             search_query: String::new(),
             search_active: false,
             filtered_item_indices: Vec::new(),
+
+            modal_open: false,
+            modal_env_var_name: String::new(),
+            modal_field_reference: None,
         };
 
         app
@@ -216,6 +224,24 @@ impl App {
 
         self.selected_item_details = Some(details);
         Ok(())
+    }
+
+    pub fn open_modal(&mut self, field_reference: String) {
+        self.modal_open = true;
+        self.modal_env_var_name.clear();
+        self.modal_field_reference = Some(field_reference);
+    }
+
+    pub fn close_modal(&mut self) {
+        self.modal_open = false;
+        self.modal_env_var_name.clear();
+        self.modal_field_reference = None;
+    }
+
+    pub fn modal_selected_field(&self) -> Option<&ItemField> {
+        let details = self.selected_item_details.as_ref()?;
+        let reference = self.modal_field_reference.as_ref()?;
+        details.fields.iter().find(|f| &f.reference == reference)
     }
 }
 

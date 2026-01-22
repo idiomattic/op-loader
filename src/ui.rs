@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use crate::app::{Account, App, FocusedPanel, ItemField, Vault, VaultItem};
@@ -31,6 +31,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
     render_command_log(frame, app, left_pane_layout[2]);
     render_vault_item_panel(frame, app, right_pane_layout[0]);
+
+    if app.modal_open {
+        render_modal(frame, app);
+    }
 }
 
 trait ListPanel {
@@ -278,6 +282,72 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
     let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+}
+
+fn render_modal(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+
+    let modal_width = area.width * 60 / 100;
+    let modal_height = 12_u16.min(area.height - 4);
+    let modal_x = (area.width - modal_width) / 2;
+    let modal_y = (area.height - modal_height) / 2;
+
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .title(" Save to Configuration ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // field info
+            Constraint::Length(1), // spacer
+            Constraint::Length(3), // env var input
+            Constraint::Length(1), // help text
+        ])
+        .split(inner);
+
+    if let Some(field) = app.modal_selected_field() {
+        let value_display = if field.field_type == "CONCEALED" {
+            "********".to_string()
+        } else {
+            field.value.clone().unwrap_or_default()
+        };
+
+        let info_text = format!(
+            "Field: {}\nValue: {}\n\nReference:\n{}",
+            field.label, value_display, field.reference
+        );
+
+        let info = Paragraph::new(info_text).wrap(Wrap { trim: false });
+        frame.render_widget(info, chunks[0]);
+    }
+
+    let input_block = Block::default()
+        .title(" Environment Variable Name ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let input_inner = input_block.inner(chunks[2]);
+    frame.render_widget(input_block, chunks[2]);
+
+    let input_text = format!("{}█", app.modal_env_var_name);
+    let input = Paragraph::new(input_text);
+    frame.render_widget(input, input_inner);
+
+    let help = Paragraph::new("Enter: Save  |  Esc: Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[3]);
 }
 
 struct AccountListPanel;

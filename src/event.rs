@@ -41,6 +41,28 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
 }
 
 fn handle_key_press(app: &mut App, key: KeyEvent) {
+    if app.modal_open {
+        match key.code {
+            KeyCode::Esc => {
+                app.close_modal();
+            }
+            KeyCode::Enter => {
+                // TODO: Save to config
+                app.close_modal();
+            }
+            KeyCode::Backspace => {
+                app.modal_env_var_name.pop();
+            }
+            KeyCode::Char(c) => {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    app.modal_env_var_name.push(c.to_ascii_uppercase());
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     if app.search_active {
         match key.code {
             KeyCode::Esc => {
@@ -176,7 +198,6 @@ impl ListNav for VaultListNav {
         let idx = self.list_state(app).selected();
         self.set_selected_idx(app, idx);
 
-        // Clear search when selecting a new vault
         app.clear_search();
 
         if let Err(e) = app.load_vault_items() {
@@ -245,5 +266,24 @@ impl ListNav for VaultItemDetailNav {
 
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
         app.selected_field_idx = idx;
+    }
+
+    fn on_select(&self, app: &mut App) {
+        let list_idx = self.list_state(app).selected();
+        self.set_selected_idx(app, list_idx);
+
+        if let Some(idx) = list_idx {
+            if let Some(details) = &app.selected_item_details {
+                let field = details
+                    .fields
+                    .iter()
+                    .filter(|f| f.label != "notesPlain")
+                    .nth(idx);
+
+                if let Some(field) = field {
+                    app.open_modal(field.reference.clone());
+                }
+            }
+        }
     }
 }
