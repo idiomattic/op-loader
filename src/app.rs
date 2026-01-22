@@ -1,10 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use confy;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, io, process::Command};
+use std::{collections::HashMap, process::Command};
 
 use crate::command_log::CommandLog;
 
@@ -84,7 +84,7 @@ impl App {
         app
     }
 
-    fn load_config(&mut self, config_path: Option<&std::path::Path>) -> Result<()> {
+    pub fn load_config(&mut self, config_path: Option<&std::path::Path>) -> Result<()> {
         let config: OpLoadConfig = if let Some(path) = config_path {
             confy::load_path(path).context("Failed to load configuration")?
         } else {
@@ -96,28 +96,28 @@ impl App {
         Ok(())
     }
 
-    fn run_op_command(&mut self, args: &[&str]) -> io::Result<Vec<u8>> {
+    fn run_op_command(&mut self, args: &[&str]) -> Result<Vec<u8>> {
         let cmd_str = format!("op {}", args.join(" "));
 
-        let output = Command::new("op").args(args).output()?;
+        let output = Command::new("op")
+            .args(args)
+            .output()
+            .context("Failed to execute op command")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             self.command_log.log_failure(&cmd_str, &stderr);
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("`{}` failed: {}", cmd_str, stderr),
-            ));
+            bail!("`{}` failed: {}", cmd_str, stderr);
         }
 
         Ok(output.stdout)
     }
 
-    pub fn load_vaults(&mut self) -> io::Result<()> {
+    pub fn load_vaults(&mut self) -> Result<()> {
         let stdout = self.run_op_command(&["vault", "list", "--format", "json"])?;
 
-        let vaults: Vec<Vault> = serde_json::from_slice(&stdout)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let vaults: Vec<Vault> =
+            serde_json::from_slice(&stdout).context("Failed to parse vault list JSON")?;
 
         self.command_log
             .log_success("op vault list", Some(vaults.len()));
@@ -135,11 +135,11 @@ impl App {
         self.selected_vault_idx.and_then(|idx| self.vaults.get(idx))
     }
 
-    pub fn load_accounts(&mut self) -> io::Result<()> {
+    pub fn load_accounts(&mut self) -> Result<()> {
         let stdout = self.run_op_command(&["account", "list", "--format", "json"])?;
 
-        let accounts: Vec<Account> = serde_json::from_slice(&stdout)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let accounts: Vec<Account> =
+            serde_json::from_slice(&stdout).context("Failed to parse account list JSON")?;
 
         self.command_log
             .log_success("op account list", Some(accounts.len()));
@@ -153,12 +153,9 @@ impl App {
         Ok(())
     }
 
-    pub fn load_vault_items(&mut self) -> io::Result<()> {
+    pub fn load_vault_items(&mut self) -> Result<()> {
         if self.selected_account_idx.is_none() || self.selected_vault_idx.is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("cannot list vault items when account/vault are not selected"),
-            ));
+            bail!("Cannot list vault items when account/vault are not selected");
         }
 
         let selected_vault_name = &self.selected_vault().unwrap().name.clone();
@@ -172,8 +169,8 @@ impl App {
             "json",
         ])?;
 
-        let vault_items: Vec<VaultItem> = serde_json::from_slice(&stdout)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let vault_items: Vec<VaultItem> =
+            serde_json::from_slice(&stdout).context("Failed to parse vault items JSON")?;
 
         self.command_log.log_success(
             format!("op item list --vault {}", selected_vault_name),
@@ -224,7 +221,7 @@ impl App {
         self.update_filtered_items();
     }
 
-    pub fn load_item_details(&mut self, item_id: &str) -> io::Result<()> {
+    pub fn load_item_details(&mut self, item_id: &str) -> Result<()> {
         let vault_name = self.selected_vault().unwrap().name.clone();
 
         let stdout = self.run_op_command(&[
@@ -237,8 +234,8 @@ impl App {
             "json",
         ])?;
 
-        let details: VaultItemDetails = serde_json::from_slice(&stdout)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let details: VaultItemDetails =
+            serde_json::from_slice(&stdout).context("Failed to parse item details JSON")?;
 
         self.command_log.log_success(
             format!("op item get {}", item_id),

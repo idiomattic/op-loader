@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::widgets::ListState;
-use std::io;
 
 use crate::app::{App, FocusedPanel};
 
@@ -31,8 +31,8 @@ impl NavAction {
     }
 }
 
-pub fn handle_events(app: &mut App) -> io::Result<()> {
-    if let Event::Key(key) = event::read()? {
+pub fn handle_events(app: &mut App) -> Result<()> {
+    if let Event::Key(key) = event::read().context("Failed to read keyboard event")? {
         if key.kind == KeyEventKind::Press {
             handle_key_press(app, key);
         }
