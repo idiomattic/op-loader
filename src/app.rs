@@ -1,3 +1,5 @@
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::Deserialize;
 use std::{io, process::Command};
@@ -25,6 +27,10 @@ pub struct App {
 
     pub item_detail_list_state: ListState,
     pub selected_field_idx: Option<usize>,
+
+    pub search_query: String,
+    pub search_active: bool,
+    pub filtered_item_indices: Vec<usize>,
 }
 
 impl App {
@@ -50,6 +56,10 @@ impl App {
 
             item_detail_list_state: ListState::default(),
             selected_field_idx: None,
+
+            search_query: String::new(),
+            search_active: false,
+            filtered_item_indices: Vec::new(),
         };
 
         app
@@ -140,12 +150,47 @@ impl App {
         );
 
         self.vault_items = vault_items;
+        self.update_filtered_items();
 
-        if !self.vault_items.is_empty() {
+        if !self.filtered_item_indices.is_empty() {
             self.vault_item_list_state.select(Some(0));
         }
 
         Ok(())
+    }
+
+    pub fn update_filtered_items(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_item_indices = (0..self.vault_items.len()).collect();
+        } else {
+            let matcher = SkimMatcherV2::default();
+            let mut scored: Vec<(usize, i64)> = self
+                .vault_items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, item)| {
+                    matcher
+                        .fuzzy_match(&item.title, &self.search_query)
+                        .map(|score| (idx, score))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.1.cmp(&a.1)); // highest score first
+            self.filtered_item_indices = scored.into_iter().map(|(idx, _)| idx).collect();
+        }
+
+        if !self.filtered_item_indices.is_empty() {
+            self.vault_item_list_state.select(Some(0));
+        } else {
+            self.vault_item_list_state.select(None);
+        }
+        self.selected_vault_item_idx = None;
+        self.selected_item_details = None;
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_active = false;
+        self.update_filtered_items();
     }
 
     pub fn load_item_details(&mut self, item_id: &str) -> io::Result<()> {
@@ -230,7 +275,9 @@ pub struct ItemField {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FieldSection {
-    pub label: String,
+    pub id: String,
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(PartialEq)]

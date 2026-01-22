@@ -25,7 +25,7 @@ impl NavAction {
             KeyCode::Char('0') => Some(Self::PanelZero),
             KeyCode::Char('1') => Some(Self::PanelOne),
             KeyCode::Char('2') => Some(Self::PanelTwo),
-            KeyCode::Char('4') => Some(Self::PanelFour),
+            KeyCode::Char('3') => Some(Self::PanelFour),
             _ => None,
         }
     }
@@ -41,6 +41,35 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
 }
 
 fn handle_key_press(app: &mut App, key: KeyEvent) {
+    if app.search_active {
+        match key.code {
+            KeyCode::Esc => {
+                app.clear_search();
+            }
+            KeyCode::Enter => {
+                app.search_active = false;
+                VaultItemListNav.on_select(app);
+            }
+            KeyCode::Backspace => {
+                app.search_query.pop();
+                app.update_filtered_items();
+            }
+            KeyCode::Char(c) => {
+                app.search_query.push(c);
+                app.update_filtered_items();
+            }
+            KeyCode::Up => VaultItemListNav.handle_up(app),
+            KeyCode::Down => VaultItemListNav.handle_down(app),
+            _ => {}
+        }
+        return;
+    }
+
+    if key.code == KeyCode::Char('/') && app.focused_panel == FocusedPanel::VaultItemList {
+        app.search_active = true;
+        return;
+    }
+
     if let Some(action) = NavAction::from_key(key.code) {
         match action {
             NavAction::Quit => app.should_quit = true,
@@ -144,6 +173,9 @@ impl ListNav for VaultListNav {
         let idx = self.list_state(app).selected();
         self.set_selected_idx(app, idx);
 
+        // Clear search when selecting a new vault
+        app.clear_search();
+
         if let Err(e) = app.load_vault_items() {
             app.error_message = Some(e.to_string());
         }
@@ -155,7 +187,7 @@ impl ListNav for VaultListNav {
 struct VaultItemListNav;
 impl ListNav for VaultItemListNav {
     fn len(&self, app: &App) -> usize {
-        app.vault_items.len()
+        app.filtered_item_indices.len()
     }
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
@@ -171,19 +203,20 @@ impl ListNav for VaultItemListNav {
     }
 
     fn on_select(&self, app: &mut App) {
-        let idx = self.list_state(app).selected();
-        self.set_selected_idx(app, idx);
+        let list_idx = self.list_state(app).selected();
+        self.set_selected_idx(app, list_idx);
 
-        if let Some(idx) = idx {
-            if let Some(item) = app.vault_items.get(idx) {
-                let item_id = item.id.clone();
-                if let Err(e) = app.load_item_details(&item_id) {
-                    app.error_message = Some(e.to_string());
-                } else {
-                    // Reset field selection and move focus to details panel
-                    app.item_detail_list_state.select(Some(0));
-                    app.selected_field_idx = None;
-                    app.focused_panel = FocusedPanel::VaultItemDetail;
+        if let Some(list_idx) = list_idx {
+            if let Some(&real_idx) = app.filtered_item_indices.get(list_idx) {
+                if let Some(item) = app.vault_items.get(real_idx) {
+                    let item_id = item.id.clone();
+                    if let Err(e) = app.load_item_details(&item_id) {
+                        app.error_message = Some(e.to_string());
+                    } else {
+                        app.item_detail_list_state.select(Some(0));
+                        app.selected_field_idx = None;
+                        app.focused_panel = FocusedPanel::VaultItemDetail;
+                    }
                 }
             }
         }

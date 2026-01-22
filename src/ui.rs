@@ -100,7 +100,7 @@ fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
 }
 
 fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = app.focused_panel == FocusedPanel::VaultItemList;
+    let is_focused = app.focused_panel == FocusedPanel::VaultItemList && !app.search_active;
 
     let block = Block::default()
         .title(" [2] Items ")
@@ -117,18 +117,93 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(10), // search box
+            Constraint::Percentage(50),
+        ])
         .split(inner);
 
-    render_list_inner(&VaultItemListPanel, frame, app, chunks[0]);
-    render_item_details(frame, app, chunks[1]);
+    render_filtered_vault_items(frame, app, chunks[0]);
+    render_search_box(frame, app, chunks[1]);
+    render_item_details(frame, app, chunks[2]);
+}
+
+fn render_filtered_vault_items(frame: &mut Frame, app: &mut App, area: Rect) {
+    let selected_idx = app.selected_vault_item_idx;
+
+    let items: Vec<ListItem> = app
+        .filtered_item_indices
+        .iter()
+        .enumerate()
+        .map(|(display_idx, &real_idx)| {
+            let item = &app.vault_items[real_idx];
+            let is_selected = selected_idx == Some(display_idx);
+            let prefix = if is_selected { "● " } else { "  " };
+            let content = format!("{}{}", prefix, item.title);
+
+            ListItem::new(content).style(if is_selected {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            })
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(list, area, &mut app.vault_item_list_state);
+}
+
+fn render_search_box(frame: &mut Frame, app: &App, area: Rect) {
+    let is_active = app.search_active;
+
+    let block = Block::default()
+        .title(" Search ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if is_active {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        });
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let text = if app.search_query.is_empty() {
+        if is_active {
+            "".to_string()
+        } else {
+            "Press / to search".to_string()
+        }
+    } else if is_active {
+        format!("{}█", app.search_query)
+    } else {
+        app.search_query.clone()
+    };
+
+    let style = if app.search_query.is_empty() && !is_active {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default()
+    };
+
+    let paragraph = Paragraph::new(text).style(style);
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_item_details(frame: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = app.focused_panel == FocusedPanel::VaultItemDetail;
 
     let block = Block::default()
-        .title(" [4] Details ")
+        .title(" [3] Details ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if is_focused {
