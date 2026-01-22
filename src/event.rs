@@ -47,8 +47,24 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                 app.close_modal();
             }
             KeyCode::Enter => {
-                // TODO: Save to config
-                app.close_modal();
+                if app.modal_env_var_name.is_empty() {
+                    app.error_message =
+                        Some("Environment variable name cannot be empty".to_string());
+                    return;
+                }
+
+                if let Some(ref op_reference) = app.modal_field_reference.clone() {
+                    match app.save_config(&app.modal_env_var_name.clone(), op_reference) {
+                        Ok(()) => {
+                            app.command_log.log_success(
+                                format!("Saved {} to config", app.modal_env_var_name),
+                                None,
+                            );
+                            app.close_modal();
+                        }
+                        Err(e) => app.error_message = Some(e.to_string()),
+                    }
+                }
             }
             KeyCode::Backspace => {
                 app.modal_env_var_name.pop();

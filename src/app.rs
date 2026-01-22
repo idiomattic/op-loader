@@ -96,6 +96,19 @@ impl App {
         Ok(())
     }
 
+    pub fn save_config(&mut self, var_name: &str, op_reference: &str) -> Result<()> {
+        if let Some(config) = &mut self.config {
+            config
+                .inject_vars
+                .insert(var_name.to_string(), op_reference.to_string());
+            confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
+        } else {
+            anyhow::bail!("Configuration can't be saved because it is not loaded");
+        }
+
+        Ok(())
+    }
+
     fn run_op_command(&mut self, args: &[&str]) -> Result<Vec<u8>> {
         let cmd_str = format!("op {}", args.join(" "));
 
