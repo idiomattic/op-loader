@@ -2,6 +2,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
@@ -69,7 +70,7 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         });
 
     if let Some(title_bottom) = panel.title_bottom() {
-        block = block.title_bottom(title_bottom);
+        block = block.title_bottom(Line::from(title_bottom).right_aligned());
     }
 
     let inner_area = block.inner(area);
@@ -373,6 +374,9 @@ impl ListPanel for AccountListPanel {
 
     fn title(&self) -> &str {
         " [0] Accounts "
+    }
+    fn title_bottom(&self) -> Option<&str> {
+        Some(" [f] Favorite ")
     }
     fn focus_variant(&self) -> FocusedPanel {
         FocusedPanel::AccountList
