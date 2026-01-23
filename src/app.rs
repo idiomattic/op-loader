@@ -110,6 +110,17 @@ impl App {
         Ok(())
     }
 
+    pub fn set_default_vault(&mut self, vault_id: &str) -> Result<()> {
+        if let Some(config) = &mut self.config {
+            config.default_vault_id = Some(vault_id.to_string());
+            confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
+        } else {
+            anyhow::bail!("Configuration can't be saved because it is not loaded");
+        }
+
+        Ok(())
+    }
+
     fn run_op_command(&mut self, args: &[&str]) -> Result<Vec<u8>> {
         let cmd_str = format!("op {}", args.join(" "));
 

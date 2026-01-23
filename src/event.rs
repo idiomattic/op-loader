@@ -113,6 +113,29 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // TODO: use `fn ensure_handle_action()` pattern?
+    if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('F') {
+        match app.focused_panel {
+            FocusedPanel::AccountList => {} // TODO
+            FocusedPanel::VaultList => {
+                if let Some(selected_vault_id) = app
+                    .vault_list_state
+                    .selected()
+                    .and_then(|idx| app.vaults.get(idx))
+                    .map(|v| v.id.clone())
+                {
+                    if let Err(e) = app.set_default_vault(&selected_vault_id) {
+                        app.command_log.log_failure(
+                            format!("Failed to save {} as default vault ID", &selected_vault_id),
+                            e.to_string(),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     if let Some(action) = NavAction::from_key(key.code) {
         match action {
             NavAction::Quit => app.should_quit = true,
