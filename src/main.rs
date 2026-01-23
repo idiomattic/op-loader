@@ -15,18 +15,30 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
     app.load_vaults()?;
     app.load_accounts()?;
 
-    if !app.accounts.is_empty() {
+    if let Some(account_idx) = app
+        .config
+        .as_ref()
+        .and_then(|c| c.default_account_id.as_ref())
+        .and_then(|account_id| {
+            app.accounts
+                .iter()
+                .position(|a| &a.account_uuid == account_id)
+        })
+    {
+        app.selected_account_idx = Some(account_idx);
+        app.account_list_state.select(Some(account_idx));
+    } else {
         app.selected_account_idx = Some(0);
     }
 
-    if let Some(idx) = app
+    if let Some(vault_idx) = app
         .config
         .as_ref()
         .and_then(|c| c.default_vault_id.as_ref())
         .and_then(|vault_id| app.vaults.iter().position(|v| &v.id == vault_id))
     {
-        app.selected_vault_idx = Some(idx);
-        app.vault_list_state.select(Some(idx));
+        app.selected_vault_idx = Some(vault_idx);
+        app.vault_list_state.select(Some(vault_idx));
     }
 
     if app.selected_account_idx.is_some() && app.selected_vault_idx.is_some() {
