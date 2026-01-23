@@ -41,6 +41,9 @@ trait ListPanel {
     type Item;
 
     fn title(&self) -> &str;
+    fn title_bottom(&self) -> Option<&str> {
+        None
+    }
     fn focus_variant(&self) -> FocusedPanel;
     fn selected_color(&self) -> Color;
 
@@ -55,7 +58,7 @@ trait ListPanel {
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = &app.focused_panel == &panel.focus_variant();
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(panel.title())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -64,6 +67,10 @@ fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         } else {
             Style::default()
         });
+
+    if let Some(title_bottom) = panel.title_bottom() {
+        block = block.title_bottom(title_bottom);
+    }
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -394,6 +401,9 @@ impl ListPanel for VaultListPanel {
 
     fn title(&self) -> &str {
         " [1] Vaults "
+    }
+    fn title_bottom(&self) -> Option<&str> {
+        Some(" [f] Favorite ")
     }
     fn focus_variant(&self) -> FocusedPanel {
         FocusedPanel::VaultList
