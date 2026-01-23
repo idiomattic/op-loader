@@ -124,11 +124,20 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                     .and_then(|idx| app.vaults.get(idx))
                     .map(|v| v.id.clone())
                 {
-                    if let Err(e) = app.set_default_vault(&selected_vault_id) {
-                        app.command_log.log_failure(
-                            format!("Failed to save {} as default vault ID", &selected_vault_id),
-                            e.to_string(),
-                        );
+                    match app.set_default_vault(&selected_vault_id) {
+                        Err(e) => {
+                            app.command_log.log_failure(
+                                format!(
+                                    "Failed to save {} as default vault ID",
+                                    &selected_vault_id
+                                ),
+                                e.to_string(),
+                            );
+                        }
+                        Ok(()) => {
+                            app.command_log
+                                .log_success(format!("Saved default vault"), None);
+                        }
                     }
                 }
             }
