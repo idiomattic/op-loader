@@ -12,6 +12,7 @@ use crate::command_log::CommandLog;
 pub struct OpLoadConfig {
     inject_vars: HashMap<String, String>,
     pub default_vault_id: Option<String>,
+    pub default_account_id: Option<String>,
 }
 
 pub struct App {
@@ -113,6 +114,17 @@ impl App {
     pub fn set_default_vault(&mut self, vault_id: &str) -> Result<()> {
         if let Some(config) = &mut self.config {
             config.default_vault_id = Some(vault_id.to_string());
+            confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
+        } else {
+            anyhow::bail!("Configuration can't be saved because it is not loaded");
+        }
+
+        Ok(())
+    }
+
+    pub fn set_default_account(&mut self, account_id: &str) -> Result<()> {
+        if let Some(config) = &mut self.config {
+            config.default_account_id = Some(account_id.to_string());
             confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
         } else {
             anyhow::bail!("Configuration can't be saved because it is not loaded");

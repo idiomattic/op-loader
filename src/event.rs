@@ -116,7 +116,28 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
     // TODO: use `fn ensure_handle_action()` pattern?
     if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('F') {
         match app.focused_panel {
-            FocusedPanel::AccountList => {} // TODO
+            FocusedPanel::AccountList => {
+                if let Some(selected_account_id) = app
+                    .account_list_state
+                    .selected()
+                    .and_then(|idx| app.accounts.get(idx))
+                    .map(|a| a.account_uuid.clone())
+                {
+                    match app.set_default_account(&selected_account_id) {
+                        Err(e) => {
+                            app.command_log.log_failure(
+                                "Failed to save default account configuration",
+                                e.to_string(),
+                            );
+                        }
+                        Ok(()) => {
+                            app.command_log
+                                .log_success("Saved default account configuration", None);
+                            AccountListNav.on_select(app);
+                        }
+                    }
+                }
+            }
             FocusedPanel::VaultList => {
                 if let Some(selected_vault_id) = app
                     .vault_list_state
@@ -127,13 +148,13 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                     match app.set_default_vault(&selected_vault_id) {
                         Err(e) => {
                             app.command_log.log_failure(
-                                "Failed to save as default vault configuration",
+                                "Failed to save default vault configuration",
                                 e.to_string(),
                             );
                         }
                         Ok(()) => {
                             app.command_log
-                                .log_success(format!("Saved default vault configuration"), None);
+                                .log_success("Saved default vault configuration", None);
                             VaultListNav.on_select(app);
                         }
                     }
