@@ -95,7 +95,7 @@ fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
             let is_selected = selected_idx == Some(idx);
             let is_favorite = panel.is_favorite(app, item);
             let prefix = if is_selected { "● " } else { "  " };
-            let suffix = if is_favorite { " (f)" } else { "" };
+            let suffix = if is_favorite { " ★" } else { "" };
             let content = format!("{}{}{}", prefix, panel.display_item(item), suffix);
 
             ListItem::new(content).style(if is_selected {
