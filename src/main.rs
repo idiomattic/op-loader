@@ -19,12 +19,14 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
         app.selected_account_idx = Some(0);
     }
 
-    if let Some(config) = &app.config {
-        if let Some(default_vault_id) = &config.default_vault_id
-            && app.selected_vault_idx.is_none()
-        {
-            app.selected_vault_idx = Some(0);
-        }
+    if let Some(idx) = app
+        .config
+        .as_ref()
+        .and_then(|c| c.default_vault_id.as_ref())
+        .and_then(|vault_id| app.vaults.iter().position(|v| &v.id == vault_id))
+    {
+        app.selected_vault_idx = Some(idx);
+        app.vault_list_state.select(Some(idx));
     }
 
     if app.selected_account_idx.is_some() && app.selected_vault_idx.is_some() {
