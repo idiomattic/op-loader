@@ -127,16 +127,14 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                     match app.set_default_vault(&selected_vault_id) {
                         Err(e) => {
                             app.command_log.log_failure(
-                                format!(
-                                    "Failed to save {} as default vault ID",
-                                    &selected_vault_id
-                                ),
+                                "Failed to save as default vault configuration",
                                 e.to_string(),
                             );
                         }
                         Ok(()) => {
                             app.command_log
-                                .log_success(format!("Saved default vault"), None);
+                                .log_success(format!("Saved default vault configuration"), None);
+                            VaultListNav.on_select(app);
                         }
                     }
                 }
