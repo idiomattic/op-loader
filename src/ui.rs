@@ -52,6 +52,10 @@ trait ListPanel {
 
     fn display_item(&self, item: &Self::Item) -> String;
 
+    fn is_favorite(&self, _app: &App, _item: &Self::Item) -> bool {
+        false
+    }
+
     fn selected_idx(&self, app: &App) -> Option<usize>;
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
 }
@@ -89,8 +93,10 @@ fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .enumerate()
         .map(|(idx, item)| {
             let is_selected = selected_idx == Some(idx);
+            let is_favorite = panel.is_favorite(app, item);
             let prefix = if is_selected { "● " } else { "  " };
-            let content = format!("{}{}", prefix, panel.display_item(item));
+            let suffix = if is_favorite { " (f)" } else { "" };
+            let content = format!("{}{}{}", prefix, panel.display_item(item), suffix);
 
             ListItem::new(content).style(if is_selected {
                 Style::default().fg(selected_color)
@@ -387,6 +393,13 @@ impl ListPanel for AccountListPanel {
     fn display_item(&self, item: &Self::Item) -> String {
         item.email.clone()
     }
+    fn is_favorite(&self, app: &App, item: &Self::Item) -> bool {
+        app.config
+            .as_ref()
+            .and_then(|c| c.default_account_id.as_ref())
+            .map(|id| id == &item.account_uuid)
+            .unwrap_or(false)
+    }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.account_list_state
     }
@@ -417,6 +430,13 @@ impl ListPanel for VaultListPanel {
     }
     fn display_item(&self, item: &Self::Item) -> String {
         item.name.clone()
+    }
+    fn is_favorite(&self, app: &App, item: &Self::Item) -> bool {
+        app.config
+            .as_ref()
+            .and_then(|c| c.default_vault_id.as_ref())
+            .map(|id| id == &item.id)
+            .unwrap_or(false)
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_list_state
