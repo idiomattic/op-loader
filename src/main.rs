@@ -19,6 +19,14 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
         app.selected_account_idx = Some(0);
     }
 
+    if let Some(config) = &app.config {
+        if let Some(default_vault_id) = &config.default_vault_id
+            && app.selected_vault_idx.is_none()
+        {
+            app.selected_vault_idx = Some(0);
+        }
+    }
+
     if app.selected_account_idx.is_some() && app.selected_vault_idx.is_some() {
         app.load_vault_items()?;
     }

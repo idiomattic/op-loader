@@ -11,6 +11,7 @@ use crate::command_log::CommandLog;
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
     inject_vars: HashMap<String, String>,
+    pub default_vault_id: Option<String>,
 }
 
 pub struct App {
@@ -96,7 +97,7 @@ impl App {
         Ok(())
     }
 
-    pub fn save_config(&mut self, var_name: &str, op_reference: &str) -> Result<()> {
+    pub fn save_op_item_config(&mut self, var_name: &str, op_reference: &str) -> Result<()> {
         if let Some(config) = &mut self.config {
             config
                 .inject_vars

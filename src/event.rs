@@ -54,7 +54,7 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                 }
 
                 if let Some(ref op_reference) = app.modal_field_reference.clone() {
-                    match app.save_config(&app.modal_env_var_name.clone(), op_reference) {
+                    match app.save_op_item_config(&app.modal_env_var_name.clone(), op_reference) {
                         Ok(()) => {
                             app.command_log.log_success(
                                 format!("Saved {} to config", app.modal_env_var_name),
