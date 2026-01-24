@@ -312,11 +312,13 @@ pub struct Vault {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Account {
     pub email: String,
+    #[allow(dead_code)]
     pub user_uuid: String,
     pub account_uuid: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ItemUrl {
     #[serde(default)]
     pub label: Option<String>,
@@ -329,17 +331,23 @@ pub struct ItemUrl {
 pub struct VaultItem {
     pub id: String,
     pub title: String,
+    #[allow(dead_code)]
     pub category: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub additional_information: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub urls: Vec<ItemUrl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct VaultItemDetails {
+    #[allow(dead_code)]
     pub id: String,
+    #[allow(dead_code)]
     pub title: String,
+    #[allow(dead_code)]
     pub category: String,
     #[serde(default)]
     pub fields: Vec<ItemField>,
@@ -354,10 +362,12 @@ pub struct ItemField {
     pub field_type: String,
     pub reference: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub section: Option<FieldSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct FieldSection {
     pub id: String,
     #[serde(default)]

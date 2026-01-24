@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::{Account, App, FocusedPanel, ItemField, Vault, VaultItem};
+use crate::app::{Account, App, FocusedPanel, ItemField, Vault};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let outer_layout = Layout::default()
@@ -446,32 +446,5 @@ impl ListPanel for VaultListPanel {
     }
     fn selected_idx(&self, app: &App) -> Option<usize> {
         app.selected_vault_idx
-    }
-}
-
-struct VaultItemListPanel;
-impl ListPanel for VaultItemListPanel {
-    type Item = VaultItem;
-
-    fn title(&self) -> &str {
-        " [2] Items "
-    }
-    fn focus_variant(&self) -> FocusedPanel {
-        FocusedPanel::VaultItemList
-    }
-    fn items<'a>(&self, app: &'a App) -> &'a [VaultItem] {
-        &app.vault_items
-    }
-    fn display_item(&self, item: &Self::Item) -> String {
-        item.title.clone()
-    }
-    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
-        &mut app.vault_item_list_state
-    }
-    fn selected_color(&self) -> Color {
-        Color::Cyan
-    }
-    fn selected_idx(&self, app: &App) -> Option<usize> {
-        app.selected_vault_item_idx
     }
 }

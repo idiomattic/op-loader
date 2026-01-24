@@ -195,7 +195,6 @@ trait ListNav {
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
 
-    fn selected_idx(&self, app: &App) -> Option<usize>;
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>);
 
     fn handle_up(&self, app: &mut App) {
@@ -236,10 +235,6 @@ impl ListNav for AccountListNav {
         &mut app.account_list_state
     }
 
-    fn selected_idx(&self, app: &App) -> Option<usize> {
-        app.selected_account_idx
-    }
-
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
         app.selected_account_idx = idx;
     }
@@ -253,10 +248,6 @@ impl ListNav for VaultListNav {
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_list_state
-    }
-
-    fn selected_idx(&self, app: &App) -> Option<usize> {
-        app.selected_vault_idx
     }
 
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
@@ -285,10 +276,6 @@ impl ListNav for VaultItemListNav {
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_item_list_state
-    }
-
-    fn selected_idx(&self, app: &App) -> Option<usize> {
-        app.selected_vault_item_idx
     }
 
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
@@ -327,10 +314,6 @@ impl ListNav for VaultItemDetailNav {
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.item_detail_list_state
-    }
-
-    fn selected_idx(&self, app: &App) -> Option<usize> {
-        app.selected_field_idx
     }
 
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
