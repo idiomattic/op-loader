@@ -2,6 +2,10 @@
 name = "op-loader"
 version = "0.0.0"
 edition = "2024"
+authors = ["Matthew Lese matthewjlese@gmail.com"]
+description = "TUI for configuring 1password secrets for injection into your shell environment"
+license = "MIT"
+repository = "https://github.com/idiomattic/op-loader"
 
 [dependencies]
 anyhow = "1.0.100"
