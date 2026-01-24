@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use confy;
 use log::{debug, info};
 use std::path::Path;
 

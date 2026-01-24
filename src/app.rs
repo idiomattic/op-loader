@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use confy;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
@@ -50,7 +49,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let app = Self {
+        Self {
             config: None,
 
             should_quit: false,
@@ -81,9 +80,7 @@ impl App {
             modal_open: false,
             modal_env_var_name: String::new(),
             modal_field_reference: None,
-        };
-
-        app
+        }
     }
 
     pub fn load_config(&mut self, config_path: Option<&std::path::Path>) -> Result<()> {

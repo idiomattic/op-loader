@@ -61,7 +61,7 @@ trait ListPanel {
 }
 
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = &app.focused_panel == &panel.focus_variant();
+    let is_focused = app.focused_panel == panel.focus_variant();
 
     let mut block = Block::default()
         .title(panel.title())
@@ -89,7 +89,7 @@ fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
 
     let items: Vec<ListItem> = panel
         .items(app)
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(idx, item)| {
             let is_selected = selected_idx == Some(idx);

@@ -32,10 +32,10 @@ impl NavAction {
 }
 
 pub fn handle_events(app: &mut App) -> Result<()> {
-    if let Event::Key(key) = event::read().context("Failed to read keyboard event")? {
-        if key.kind == KeyEventKind::Press {
-            handle_key_press(app, key);
-        }
+    if let Event::Key(key) = event::read().context("Failed to read keyboard event")?
+        && key.kind == KeyEventKind::Press
+    {
+        handle_key_press(app, key);
     }
     Ok(())
 }
@@ -286,18 +286,17 @@ impl ListNav for VaultItemListNav {
         let list_idx = self.list_state(app).selected();
         self.set_selected_idx(app, list_idx);
 
-        if let Some(list_idx) = list_idx {
-            if let Some(&real_idx) = app.filtered_item_indices.get(list_idx) {
-                if let Some(item) = app.vault_items.get(real_idx) {
-                    let item_id = item.id.clone();
-                    if let Err(e) = app.load_item_details(&item_id) {
-                        app.error_message = Some(e.to_string());
-                    } else {
-                        app.item_detail_list_state.select(Some(0));
-                        app.selected_field_idx = None;
-                        app.focused_panel = FocusedPanel::VaultItemDetail;
-                    }
-                }
+        if let Some(list_idx) = list_idx
+            && let Some(&real_idx) = app.filtered_item_indices.get(list_idx)
+            && let Some(item) = app.vault_items.get(real_idx)
+        {
+            let item_id = item.id.clone();
+            if let Err(e) = app.load_item_details(&item_id) {
+                app.error_message = Some(e.to_string());
+            } else {
+                app.item_detail_list_state.select(Some(0));
+                app.selected_field_idx = None;
+                app.focused_panel = FocusedPanel::VaultItemDetail;
             }
         }
     }
@@ -324,17 +323,17 @@ impl ListNav for VaultItemDetailNav {
         let list_idx = self.list_state(app).selected();
         self.set_selected_idx(app, list_idx);
 
-        if let Some(idx) = list_idx {
-            if let Some(details) = &app.selected_item_details {
-                let field = details
-                    .fields
-                    .iter()
-                    .filter(|f| f.label != "notesPlain")
-                    .nth(idx);
+        if let Some(idx) = list_idx
+            && let Some(details) = &app.selected_item_details
+        {
+            let field = details
+                .fields
+                .iter()
+                .filter(|f| f.label != "notesPlain")
+                .nth(idx);
 
-                if let Some(field) = field {
-                    app.open_modal(field.reference.clone());
-                }
+            if let Some(field) = field {
+                app.open_modal(field.reference.clone());
             }
         }
     }
