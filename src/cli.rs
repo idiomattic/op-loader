@@ -68,13 +68,18 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
         ConfigAction::Path => {
             info!("Getting config path");
 
-            let config_path = confy::get_configuration_file_path("op_loader", None)
-                .context("Failed to get config path")?
-                .display()
-                .to_string();
+            if let Some(path) = config_path {
+                debug!("Config path (provided): {}", path.display());
+                println!("{}", path.display());
+            } else {
+                let resolved_path = confy::get_configuration_file_path("op_loader", None)
+                    .context("Failed to get config path")?
+                    .display()
+                    .to_string();
 
-            debug!("Config path resolved to: {}", config_path);
-            println!("{}", config_path);
+                debug!("Config path resolved to: {}", resolved_path);
+                println!("{}", resolved_path);
+            }
             Ok(())
         }
     }
@@ -125,4 +130,96 @@ pub fn handle_env_injection() -> Result<()> {
 
     info!("Finished processing env var mappings");
     Ok(())
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+    use assert_fs::TempDir;
+
+    #[test]
+    fn config_get_default_account_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let config = OpLoadConfig {
+            default_account_id: Some("test-account-123".to_string()),
+            ..Default::default()
+        };
+        confy::store_path(&config_path, &config).unwrap();
+
+        let result = handle_config_action_with_path(
+            ConfigAction::Get {
+                key: "default_account_id".to_string(),
+            },
+            Some(&config_path),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn config_get_default_vault_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let config = OpLoadConfig {
+            default_vault_id: Some("test-vault-456".to_string()),
+            ..Default::default()
+        };
+        confy::store_path(&config_path, &config).unwrap();
+
+        let result = handle_config_action_with_path(
+            ConfigAction::Get {
+                key: "default_vault_id".to_string(),
+            },
+            Some(&config_path),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn config_get_unknown_key() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let result = handle_config_action_with_path(
+            ConfigAction::Get {
+                key: "nonexistent_key".to_string(),
+            },
+            Some(&config_path),
+        );
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown config key")
+        );
+    }
+
+    #[test]
+    fn config_path_shows_custom_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let result = handle_config_action_with_path(ConfigAction::Path, Some(&config_path));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn config_get_when_file_does_not_exist_returns_not_set() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("nonexistent.toml");
+
+        let result = handle_config_action_with_path(
+            ConfigAction::Get {
+                key: "default_account_id".to_string(),
+            },
+            Some(&config_path),
+        );
+
+        assert!(result.is_ok());
+    }
 }
