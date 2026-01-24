@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use confy;
 use log::{debug, info};
+use std::path::Path;
 
 use crate::app::OpLoadConfig;
 
@@ -34,14 +35,21 @@ pub enum ConfigAction {
 }
 
 pub fn handle_config_action(action: ConfigAction) -> Result<()> {
+    handle_config_action_with_path(action, None)
+}
+
+fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Path>) -> Result<()> {
     debug!("Handling config action: {:?}", action);
 
     match action {
         ConfigAction::Get { key } => {
             info!("Getting config key: {}", key);
 
-            let config: OpLoadConfig =
-                confy::load("op_loader", None).context("Failed to load configuration")?;
+            let config: OpLoadConfig = if let Some(path) = config_path {
+                confy::load_path(path).context("Failed to load configuration")?
+            } else {
+                confy::load("op_loader", None).context("Failed to load configuration")?
+            };
             debug!("Config loaded successfully");
 
             match key.as_str() {
