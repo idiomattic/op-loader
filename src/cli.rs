@@ -1,7 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use confy;
 
-use super::app::OpLoadConfig;
+use crate::app::{App, OpLoadConfig};
 
 #[derive(Parser)]
 #[command(version)]
@@ -23,10 +24,6 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum ConfigAction {
-    Set {
-        #[arg(short, long)]
-        key: String,
-    },
     Get {
         #[arg(short, long)]
         key: String,
@@ -34,11 +31,12 @@ enum ConfigAction {
     Path,
 }
 
-fn handle_config_action(action: ConfigAction) -> Result<()> {
-    handle_config_action_with_config(action, None)
+fn handle_config_action(app: &mut App, action: ConfigAction) -> Result<()> {
+    handle_config_action_with_config(app, action, None)
 }
 
 pub fn handle_config_action_with_config(
+    app: &mut App,
     action: ConfigAction,
     config: Option<OpLoadConfig>,
 ) -> Result<()> {
@@ -61,7 +59,14 @@ pub fn handle_config_action_with_config(
                 anyhow::bail!("Failed to load configuration")
             }
         }
-        ConfigAction::Set { key } => {}
-        ConfigAction::Path => {}
+        ConfigAction::Path => {
+            let config_path = confy::get_configuration_file_path("op_loader", None)
+                .context("Failed to get config path")?
+                .display()
+                .to_string();
+
+            println!("{}", config_path);
+            Ok(())
+        }
     }
 }
