@@ -2,20 +2,20 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use confy;
 
-use crate::app::{App, OpLoadConfig};
+use crate::app::OpLoadConfig;
 
 #[derive(Parser)]
 #[command(version)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
-    command: Command,
+    pub command: Option<Command>,
 
     #[command(flatten)]
-    verbosity: clap_verbosity_flag::Verbosity,
+    pub verbosity: clap_verbosity_flag::Verbosity,
 }
 
 #[derive(Subcommand)]
-enum Command {
+pub enum Command {
     Config {
         #[command(subcommand)]
         action: ConfigAction,
@@ -23,7 +23,7 @@ enum Command {
 }
 
 #[derive(Subcommand, Debug)]
-enum ConfigAction {
+pub enum ConfigAction {
     Get {
         #[arg(short, long)]
         key: String,
@@ -31,33 +31,24 @@ enum ConfigAction {
     Path,
 }
 
-fn handle_config_action(app: &mut App, action: ConfigAction) -> Result<()> {
-    handle_config_action_with_config(app, action, None)
-}
-
-pub fn handle_config_action_with_config(
-    app: &mut App,
-    action: ConfigAction,
-    config: Option<OpLoadConfig>,
-) -> Result<()> {
+pub fn handle_config_action(action: ConfigAction) -> Result<()> {
     match action {
         ConfigAction::Get { key } => {
-            if let Some(config) = config {
-                match key.as_str() {
-                    "default_account_id" => match &config.default_account_id {
-                        Some(preferred_account) => println!("{}", preferred_account),
-                        None => println!("(not set)"),
-                    },
-                    "default_vault_id" => match &config.default_vault_id {
-                        Some(preferred_vault) => println!("{}", preferred_vault),
-                        None => println!("(not set)"),
-                    },
-                    _ => anyhow::bail!("Unknown config key: '{}'.", key),
-                }
-                Ok(())
-            } else {
-                anyhow::bail!("Failed to load configuration")
+            let config: OpLoadConfig =
+                confy::load("op_loader", None).context("Failed to load configuration")?;
+
+            match key.as_str() {
+                "default_account_id" => match &config.default_account_id {
+                    Some(preferred_account) => println!("{}", preferred_account),
+                    None => println!("(not set)"),
+                },
+                "default_vault_id" => match &config.default_vault_id {
+                    Some(preferred_vault) => println!("{}", preferred_vault),
+                    None => println!("(not set)"),
+                },
+                _ => anyhow::bail!("Unknown config key: '{}'.", key),
             }
+            Ok(())
         }
         ConfigAction::Path => {
             let config_path = confy::get_configuration_file_path("op_loader", None)

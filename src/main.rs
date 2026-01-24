@@ -5,9 +5,12 @@ mod event;
 mod ui;
 
 use anyhow::Result;
+use clap::Parser;
+use env_logger;
 use ratatui::DefaultTerminal;
 
 use app::App;
+use cli::{Cli, Command};
 
 fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
     let mut app = App::new();
@@ -55,6 +58,16 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    ratatui::run(|terminal| run_app(terminal))?;
+    let args = Cli::parse();
+
+    env_logger::Builder::new()
+        .filter_level(args.verbosity.into())
+        .init();
+
+    match args.command {
+        Some(Command::Config { action }) => cli::handle_config_action(action)?,
+        Some(Command::Env) => cli::handle_env_injection()?,
+        None => ratatui::run(|terminal| run_app(terminal))?,
+    };
     Ok(())
 }
