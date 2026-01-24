@@ -1,19 +1,21 @@
-# op-load
+# op-loader
 A TUI and CLI tool for managing 1Password secrets as environment variables.
 
+[![CI](https://github.com/idiomattic/op-loader/workflows/CI/badge.svg)](https://github.com/idiomattic/op-loader/actions)
+
 ## Overview
-`op-load` provides a terminal UI for browsing your 1Password vaults and configuring which fields to inject as environment variables. Once configured, use the `env` subcommand to load secrets into your shell session.
+`op-loader` provides a terminal UI for browsing your 1Password vaults and configuring which fields to inject as environment variables. Once configured, use the `env` subcommand to load secrets into your shell session.
 
 ### Installation
 
 Via Cargo
 ```bash
-cargo install op-load
+cargo install op-loader
 ```
 Or build from source:
 ```bash
-git clone https://github.com/idiomattic/op-load
-cd op-load
+git clone https://github.com/idiomattic/op-loader
+cd op-loader
 cargo install --path .
 ```
 
@@ -24,7 +26,7 @@ cargo install --path .
 
 ### TUI Mode
 ```bash
-op-load
+op-loader
 ```
 Launch the interactive terminal UI to:
 - Browse accounts and vaults
@@ -45,26 +47,26 @@ Launch the interactive terminal UI to:
 
 ### Inject Environment Variables
 ```bash
-eval "$(op-load env)"
+eval "$(op-loader env)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
 
 ### Configuration
 Show config file location:
 ```bash
-op-load config path
+op-loader config path
 ```
 View current settings:
 ```bash
-op-load config get -k default_vault_id
-op-load config get -k default_account_id
+op-loader config get -k default_vault_id
+op-loader config get -k default_account_id
 ```
 
 ## How It Works
 1. Use the TUI to browse your 1Password vaults and select fields
 2. Map fields to environment variable names (e.g., `op://Personal/GitHub/token` -> `GITHUB_TOKEN`)
 3. Mappings are saved to the config file
-4. Run `eval "$(op-load env)"` to inject secrets into your shell
+4. Run `eval "$(op-loader env)"` to inject secrets into your shell
 
 ### Configuration
 Default config location: `~/.config/op_loader/default-config.toml`
