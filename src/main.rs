@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod command_log;
 mod event;
 mod ui;
