@@ -7,7 +7,11 @@ A TUI and CLI tool for managing 1Password secrets as environment variables.
 `op-loader` provides a terminal UI for browsing your 1Password vaults and configuring which fields to inject as environment variables. Once configured, use the `env` subcommand to load secrets into your shell session.
 
 ### Installation
-
+Via Homebrew (macOS/Linux)
+```bash
+brew tap idiomattic/op-loader
+brew install op-loader
+```
 Via Cargo
 ```bash
 cargo install op-loader
@@ -47,7 +51,8 @@ Launch the interactive terminal UI to:
 
 ### Inject Environment Variables
 ```bash
-eval "$(op-loader env)"
+# `-v` will print info logs about the number of vars loaded
+eval "$(op-loader env -v)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
 
