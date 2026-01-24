@@ -10,7 +10,7 @@ use crate::command_log::CommandLog;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
-    inject_vars: HashMap<String, String>,
+    pub inject_vars: HashMap<String, String>,
     pub default_vault_id: Option<String>,
     pub default_account_id: Option<String>,
 }
