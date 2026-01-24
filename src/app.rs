@@ -371,3 +371,310 @@ pub enum FocusedPanel {
     VaultItemList,
     VaultItemDetail,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_vault_item(id: &str, title: &str) -> VaultItem {
+        VaultItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            category: "LOGIN".to_string(),
+            additional_information: None,
+            urls: vec![],
+        }
+    }
+
+    fn make_item_field(label: &str, reference: &str) -> ItemField {
+        ItemField {
+            label: label.to_string(),
+            value: Some("secret-value".to_string()),
+            field_type: "CONCEALED".to_string(),
+            reference: reference.to_string(),
+            section: None,
+        }
+    }
+
+    mod update_filtered_items {
+        use super::*;
+
+        #[test]
+        fn empty_query_returns_all_items() {
+            let mut app = App::new();
+            app.vault_items = vec![
+                make_vault_item("1", "GitHub Token"),
+                make_vault_item("2", "AWS Secret"),
+                make_vault_item("3", "Database Password"),
+            ];
+            app.search_query = String::new();
+
+            app.update_filtered_items();
+
+            assert_eq!(app.filtered_item_indices, vec![0, 1, 2]);
+        }
+
+        #[test]
+        fn filters_by_fuzzy_match() {
+            let mut app = App::new();
+            app.vault_items = vec![
+                make_vault_item("1", "GitHub Token"),
+                make_vault_item("2", "AWS Secret"),
+                make_vault_item("3", "GitLab Token"),
+            ];
+            app.search_query = "git".to_string();
+
+            app.update_filtered_items();
+
+            assert_eq!(app.filtered_item_indices.len(), 2);
+            assert!(app.filtered_item_indices.contains(&0)); // GitHub
+            assert!(app.filtered_item_indices.contains(&2)); // GitLab
+        }
+
+        #[test]
+        fn no_matches_returns_empty() {
+            let mut app = App::new();
+            app.vault_items = vec![
+                make_vault_item("1", "GitHub Token"),
+                make_vault_item("2", "AWS Secret"),
+            ];
+            app.search_query = "zzzzz".to_string();
+
+            app.update_filtered_items();
+
+            assert!(app.filtered_item_indices.is_empty());
+            assert!(app.vault_item_list_state.selected().is_none());
+        }
+
+        #[test]
+        fn selects_first_item_when_results_exist() {
+            let mut app = App::new();
+            app.vault_items = vec![
+                make_vault_item("1", "GitHub Token"),
+                make_vault_item("2", "AWS Secret"),
+            ];
+            app.search_query = String::new();
+
+            app.update_filtered_items();
+
+            assert_eq!(app.vault_item_list_state.selected(), Some(0));
+        }
+
+        #[test]
+        fn clears_selected_item_details() {
+            let mut app = App::new();
+            app.vault_items = vec![make_vault_item("1", "GitHub Token")];
+            app.selected_vault_item_idx = Some(0);
+            app.selected_item_details = Some(VaultItemDetails {
+                id: "1".to_string(),
+                title: "GitHub Token".to_string(),
+                category: "LOGIN".to_string(),
+                fields: vec![],
+            });
+
+            app.update_filtered_items();
+
+            assert!(app.selected_vault_item_idx.is_none());
+            assert!(app.selected_item_details.is_none());
+        }
+
+        #[test]
+        fn empty_vault_items_returns_empty() {
+            let mut app = App::new();
+            app.vault_items = vec![];
+            app.search_query = "test".to_string();
+
+            app.update_filtered_items();
+
+            assert!(app.filtered_item_indices.is_empty());
+        }
+    }
+
+    mod clear_search {
+        use super::*;
+
+        #[test]
+        fn clears_query_and_deactivates() {
+            let mut app = App::new();
+            app.search_query = "some search".to_string();
+            app.search_active = true;
+
+            app.clear_search();
+
+            assert!(app.search_query.is_empty());
+            assert!(!app.search_active);
+        }
+
+        #[test]
+        fn resets_filtered_items_to_all() {
+            let mut app = App::new();
+            app.vault_items = vec![
+                make_vault_item("1", "GitHub Token"),
+                make_vault_item("2", "AWS Secret"),
+            ];
+            app.search_query = "git".to_string();
+            app.update_filtered_items();
+
+            app.clear_search();
+
+            assert_eq!(app.filtered_item_indices, vec![0, 1]);
+        }
+    }
+
+    mod open_modal {
+        use super::*;
+
+        #[test]
+        fn sets_modal_state() {
+            let mut app = App::new();
+            let reference = "op://vault/item/field".to_string();
+
+            app.open_modal(reference.clone());
+
+            assert!(app.modal_open);
+            assert_eq!(app.modal_field_reference, Some(reference));
+            assert!(app.modal_env_var_name.is_empty());
+        }
+
+        #[test]
+        fn clears_previous_env_var_name() {
+            let mut app = App::new();
+            app.modal_env_var_name = "OLD_VAR".to_string();
+
+            app.open_modal("op://vault/item/field".to_string());
+
+            assert!(app.modal_env_var_name.is_empty());
+        }
+    }
+
+    mod close_modal {
+        use super::*;
+
+        #[test]
+        fn resets_all_modal_state() {
+            let mut app = App::new();
+            app.modal_open = true;
+            app.modal_env_var_name = "MY_VAR".to_string();
+            app.modal_field_reference = Some("op://vault/item/field".to_string());
+            app.error_message = Some("some error".to_string());
+
+            app.close_modal();
+
+            assert!(!app.modal_open);
+            assert!(app.modal_env_var_name.is_empty());
+            assert!(app.modal_field_reference.is_none());
+            assert!(app.error_message.is_none());
+        }
+    }
+
+    mod modal_selected_field {
+        use super::*;
+
+        #[test]
+        fn returns_matching_field() {
+            let mut app = App::new();
+            let reference = "op://vault/item/password".to_string();
+            app.selected_item_details = Some(VaultItemDetails {
+                id: "1".to_string(),
+                title: "Test Item".to_string(),
+                category: "LOGIN".to_string(),
+                fields: vec![
+                    make_item_field("username", "op://vault/item/username"),
+                    make_item_field("password", "op://vault/item/password"),
+                ],
+            });
+            app.modal_field_reference = Some(reference);
+
+            let field = app.modal_selected_field();
+
+            assert!(field.is_some());
+            assert_eq!(field.unwrap().label, "password");
+        }
+
+        #[test]
+        fn returns_none_when_no_details() {
+            let mut app = App::new();
+            app.selected_item_details = None;
+            app.modal_field_reference = Some("op://vault/item/field".to_string());
+
+            assert!(app.modal_selected_field().is_none());
+        }
+
+        #[test]
+        fn returns_none_when_no_reference() {
+            let mut app = App::new();
+            app.selected_item_details = Some(VaultItemDetails {
+                id: "1".to_string(),
+                title: "Test Item".to_string(),
+                category: "LOGIN".to_string(),
+                fields: vec![make_item_field("password", "op://vault/item/password")],
+            });
+            app.modal_field_reference = None;
+
+            assert!(app.modal_selected_field().is_none());
+        }
+
+        #[test]
+        fn returns_none_when_reference_not_found() {
+            let mut app = App::new();
+            app.selected_item_details = Some(VaultItemDetails {
+                id: "1".to_string(),
+                title: "Test Item".to_string(),
+                category: "LOGIN".to_string(),
+                fields: vec![make_item_field("password", "op://vault/item/password")],
+            });
+            app.modal_field_reference = Some("op://vault/item/nonexistent".to_string());
+
+            assert!(app.modal_selected_field().is_none());
+        }
+    }
+
+    mod selected_vault {
+        use super::*;
+
+        #[test]
+        fn returns_vault_at_index() {
+            let mut app = App::new();
+            app.vaults = vec![
+                Vault {
+                    id: "v1".to_string(),
+                    name: "Personal".to_string(),
+                },
+                Vault {
+                    id: "v2".to_string(),
+                    name: "Work".to_string(),
+                },
+            ];
+            app.selected_vault_idx = Some(1);
+
+            let vault = app.selected_vault();
+
+            assert!(vault.is_some());
+            assert_eq!(vault.unwrap().name, "Work");
+        }
+
+        #[test]
+        fn returns_none_when_no_selection() {
+            let mut app = App::new();
+            app.vaults = vec![Vault {
+                id: "v1".to_string(),
+                name: "Personal".to_string(),
+            }];
+            app.selected_vault_idx = None;
+
+            assert!(app.selected_vault().is_none());
+        }
+
+        #[test]
+        fn returns_none_when_index_out_of_bounds() {
+            let mut app = App::new();
+            app.vaults = vec![Vault {
+                id: "v1".to_string(),
+                name: "Personal".to_string(),
+            }];
+            app.selected_vault_idx = Some(5);
+
+            assert!(app.selected_vault().is_none());
+        }
+    }
+}
