@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use confy;
+use log::{debug, info};
 
 use crate::app::OpLoadConfig;
 
@@ -33,10 +34,15 @@ pub enum ConfigAction {
 }
 
 pub fn handle_config_action(action: ConfigAction) -> Result<()> {
+    debug!("Handling config action: {:?}", action);
+
     match action {
         ConfigAction::Get { key } => {
+            info!("Getting config key: {}", key);
+
             let config: OpLoadConfig =
                 confy::load("op_loader", None).context("Failed to load configuration")?;
+            debug!("Config loaded successfully");
 
             match key.as_str() {
                 "default_account_id" => match &config.default_account_id {
@@ -52,11 +58,14 @@ pub fn handle_config_action(action: ConfigAction) -> Result<()> {
             Ok(())
         }
         ConfigAction::Path => {
+            info!("Getting config path");
+
             let config_path = confy::get_configuration_file_path("op_loader", None)
                 .context("Failed to get config path")?
                 .display()
                 .to_string();
 
+            debug!("Config path resolved to: {}", config_path);
             println!("{}", config_path);
             Ok(())
         }
@@ -66,15 +75,23 @@ pub fn handle_config_action(action: ConfigAction) -> Result<()> {
 pub fn handle_env_injection() -> Result<()> {
     use std::process::Command;
 
+    info!("Loading environment variable mappings");
+
     let config: OpLoadConfig =
         confy::load("op_loader", None).context("Failed to load configuration")?;
+    debug!("Config loaded successfully");
 
     if config.inject_vars.is_empty() {
+        info!("No environment variables configured");
         eprintln!("No environment variables configured. Use the TUI to add mappings.");
         return Ok(());
     }
 
+    info!("Processing {} env var mappings", config.inject_vars.len());
+
     for (env_var_name, op_reference) in &config.inject_vars {
+        debug!("Reading {} from {}", env_var_name, op_reference);
+
         let output = Command::new("op")
             .args(["read", op_reference])
             .output()
@@ -82,6 +99,7 @@ pub fn handle_env_injection() -> Result<()> {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            debug!("Failed to read {}: {}", op_reference, stderr.trim());
             eprintln!(
                 "# Warning: Failed to read {} for {}: {}",
                 op_reference, env_var_name, stderr
@@ -91,10 +109,12 @@ pub fn handle_env_injection() -> Result<()> {
 
         let value = String::from_utf8_lossy(&output.stdout);
         let value = value.trim();
+        debug!("Successfully read value for {}", env_var_name);
 
         let escaped_value = value.replace("'", "'\"'\"'");
         println!("export {}='{}'", env_var_name, escaped_value);
     }
 
+    info!("Finished processing env var mappings");
     Ok(())
 }

@@ -871,6 +871,7 @@ dependencies = [
  "crossterm",
  "env_logger",
  "fuzzy-matcher",
+ "log",
  "ratatui",
  "serde",
  "serde_json",
