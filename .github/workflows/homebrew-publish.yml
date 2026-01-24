@@ -28,10 +28,6 @@ jobs:
           homebrew_tap: homebrew-op-loader
           formula_folder: Formula
 
-          homepage: https://github.com/idiomattic/op-loader
-          description: TUI for configuring 1password secrets for injection into your shell environment
-          license: MIT
-
           install: 'system "cargo", "install", *std_cargo_args'
           test: 'assert_match version.to_s, shell_output("#{bin}/op-loader --version")'
 
