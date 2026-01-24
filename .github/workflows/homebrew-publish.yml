@@ -1,0 +1,38 @@
+name: Publish-Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+permissions:
+  contents: write
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+  update-homebrew:
+    name: Update Homebrew formula
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - uses: Justintime50/homebrew-releaser@v1
+        with:
+          github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+          homebrew_owner: idiomattic
+          homebrew_tap: homebrew-op-loader
+          formula_folder: Formula
+
+          homepage: https://github.com/idiomattic/op-loader
+          description: TUI for configuring 1password secrets for injection into your shell environment
+          license: MIT
+
+          install: 'system "cargo", "install", *std_cargo_args'
+          test: 'assert_match version.to_s, shell_output("#{bin}/op-loader --version")'
+
+          depends_on: '"rust" => :build'
