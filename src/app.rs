@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, bail};
-use fuzzy_matcher::FuzzyMatcher;
+use anyhow::{bail, Context, Result};
 use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
@@ -148,7 +148,13 @@ impl App {
     }
 
     pub fn load_vaults(&mut self) -> Result<()> {
-        let stdout = self.run_op_command(&["vault", "list", "--format", "json"])?;
+        let account_uuid = self.selected_account().map(|a| a.account_uuid.clone());
+
+        let stdout = if let Some(ref uuid) = account_uuid {
+            self.run_op_command(&["vault", "list", "--account", uuid, "--format", "json"])?
+        } else {
+            self.run_op_command(&["vault", "list", "--format", "json"])?
+        };
 
         let vaults: Vec<Vault> =
             serde_json::from_slice(&stdout).context("Failed to parse vault list JSON")?;
@@ -157,9 +163,12 @@ impl App {
             .log_success("op vault list", Some(vaults.len()));
 
         self.vaults = vaults;
+        self.selected_vault_idx = None;
 
         if !self.vaults.is_empty() {
             self.vault_list_state.select(Some(0));
+        } else {
+            self.vault_list_state.select(None);
         }
 
         Ok(())
@@ -167,6 +176,11 @@ impl App {
 
     pub fn selected_vault(&self) -> Option<&Vault> {
         self.selected_vault_idx.and_then(|idx| self.vaults.get(idx))
+    }
+
+    pub fn selected_account(&self) -> Option<&Account> {
+        self.selected_account_idx
+            .and_then(|idx| self.accounts.get(idx))
     }
 
     pub fn load_accounts(&mut self) -> Result<()> {
@@ -192,13 +206,16 @@ impl App {
             bail!("Cannot list vault items when account/vault are not selected");
         }
 
-        let selected_vault_name = &self.selected_vault().unwrap().name.clone();
+        let account_uuid = self.selected_account().unwrap().account_uuid.clone();
+        let vault_name = self.selected_vault().unwrap().name.clone();
 
         let stdout = self.run_op_command(&[
             "item",
             "list",
+            "--account",
+            &account_uuid,
             "--vault",
-            selected_vault_name,
+            &vault_name,
             "--format",
             "json",
         ])?;
@@ -207,7 +224,7 @@ impl App {
             serde_json::from_slice(&stdout).context("Failed to parse vault items JSON")?;
 
         self.command_log.log_success(
-            format!("op item list --vault {}", selected_vault_name),
+            format!("op item list --vault {}", vault_name),
             Some(vault_items.len()),
         );
 
@@ -256,12 +273,15 @@ impl App {
     }
 
     pub fn load_item_details(&mut self, item_id: &str) -> Result<()> {
+        let account_uuid = self.selected_account().unwrap().account_uuid.clone();
         let vault_name = self.selected_vault().unwrap().name.clone();
 
         let stdout = self.run_op_command(&[
             "item",
             "get",
             item_id,
+            "--account",
+            &account_uuid,
             "--vault",
             &vault_name,
             "--format",

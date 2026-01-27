@@ -238,6 +238,22 @@ impl ListNav for AccountListNav {
     fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
         app.selected_account_idx = idx;
     }
+
+    fn on_select(&self, app: &mut App) {
+        let idx = self.list_state(app).selected();
+        self.set_selected_idx(app, idx);
+
+        app.clear_search();
+        app.vault_items.clear();
+        app.filtered_item_indices.clear();
+        app.selected_item_details = None;
+
+        if let Err(e) = app.load_vaults() {
+            app.error_message = Some(e.to_string());
+        }
+
+        app.focused_panel = FocusedPanel::VaultList;
+    }
 }
 
 struct VaultListNav;
