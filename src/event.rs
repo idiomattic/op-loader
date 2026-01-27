@@ -139,13 +139,14 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                 }
             }
             FocusedPanel::VaultList => {
-                if let Some(selected_vault_id) = app
-                    .vault_list_state
-                    .selected()
-                    .and_then(|idx| app.vaults.get(idx))
-                    .map(|v| v.id.clone())
-                {
-                    match app.set_default_vault(&selected_vault_id) {
+                if let (Some(selected_account_id), Some(selected_vault_id)) = (
+                    app.selected_account().map(|a| a.account_uuid.clone()),
+                    app.vault_list_state
+                        .selected()
+                        .and_then(|idx| app.vaults.get(idx))
+                        .map(|v| v.id.clone()),
+                ) {
+                    match app.set_default_vault(&selected_account_id, &selected_vault_id) {
                         Err(e) => {
                             app.command_log.log_failure(
                                 "Failed to save default vault configuration",
@@ -250,6 +251,24 @@ impl ListNav for AccountListNav {
 
         if let Err(e) = app.load_vaults() {
             app.error_message = Some(e.to_string());
+        }
+
+        if let Some(vault_idx) = app
+            .selected_account()
+            .map(|a| a.account_uuid.clone())
+            .and_then(|account_id| {
+                app.config
+                    .as_ref()
+                    .and_then(|c| c.default_vault_per_account.get(&account_id))
+            })
+            .and_then(|vault_id| app.vaults.iter().position(|v| &v.id == vault_id))
+        {
+            app.selected_vault_idx = Some(vault_idx);
+            app.vault_list_state.select(Some(vault_idx));
+
+            if let Err(e) = app.load_vault_items() {
+                app.error_message = Some(e.to_string());
+            }
         }
 
         app.focused_panel = FocusedPanel::VaultList;

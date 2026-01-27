@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{Account, App, FocusedPanel, ItemField, Vault};
@@ -432,10 +432,14 @@ impl ListPanel for VaultListPanel {
         item.name.clone()
     }
     fn is_favorite(&self, app: &App, item: &Self::Item) -> bool {
-        app.config
-            .as_ref()
-            .and_then(|c| c.default_vault_id.as_ref())
-            .map(|id| id == &item.id)
+        app.selected_account()
+            .map(|a| a.account_uuid.clone())
+            .and_then(|account_id| {
+                app.config
+                    .as_ref()
+                    .and_then(|c| c.default_vault_per_account.get(&account_id))
+            })
+            .map(|vault_id| vault_id == &item.id)
             .unwrap_or(false)
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {

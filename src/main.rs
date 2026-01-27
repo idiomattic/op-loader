@@ -15,7 +15,6 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
     let mut app = App::new();
 
     app.load_config(None)?;
-    app.load_vaults()?;
     app.load_accounts()?;
 
     if let Some(account_idx) = app
@@ -30,14 +29,21 @@ fn run_app(terminal: &mut DefaultTerminal) -> Result<()> {
     {
         app.selected_account_idx = Some(account_idx);
         app.account_list_state.select(Some(account_idx));
-    } else {
+    } else if !app.accounts.is_empty() {
         app.selected_account_idx = Some(0);
+        app.account_list_state.select(Some(0));
     }
 
+    app.load_vaults()?;
+
     if let Some(vault_idx) = app
-        .config
-        .as_ref()
-        .and_then(|c| c.default_vault_id.as_ref())
+        .selected_account()
+        .map(|a| a.account_uuid.clone())
+        .and_then(|account_id| {
+            app.config
+                .as_ref()
+                .and_then(|c| c.default_vault_per_account.get(&account_id))
+        })
         .and_then(|vault_id| app.vaults.iter().position(|v| &v.id == vault_id))
     {
         app.selected_vault_idx = Some(vault_idx);

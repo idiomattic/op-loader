@@ -56,10 +56,6 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
                     Some(preferred_account) => println!("{}", preferred_account),
                     None => println!("(not set)"),
                 },
-                "default_vault_id" => match &config.default_vault_id {
-                    Some(preferred_vault) => println!("{}", preferred_vault),
-                    None => println!("(not set)"),
-                },
                 _ => anyhow::bail!("Unknown config key: '{}'.", key),
             }
             Ok(())
@@ -157,26 +153,6 @@ mod config_tests {
     }
 
     #[test]
-    fn config_get_default_vault_id() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("config.toml");
-
-        let config = OpLoadConfig {
-            default_vault_id: Some("test-vault-456".to_string()),
-            ..Default::default()
-        };
-        confy::store_path(&config_path, &config).unwrap();
-
-        let result = handle_config_action_with_path(
-            ConfigAction::Get {
-                key: "default_vault_id".to_string(),
-            },
-            Some(&config_path),
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn config_get_unknown_key() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.toml");
@@ -189,12 +165,10 @@ mod config_tests {
         );
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unknown config key")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown config key"));
     }
 
     #[test]

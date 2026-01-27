@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
-use fuzzy_matcher::skim::SkimMatcherV2;
+use anyhow::{Context, Result, bail};
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
@@ -10,8 +10,8 @@ use crate::command_log::CommandLog;
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
     pub inject_vars: HashMap<String, String>,
-    pub default_vault_id: Option<String>,
     pub default_account_id: Option<String>,
+    pub default_vault_per_account: HashMap<String, String>,
 }
 
 pub struct App {
@@ -108,9 +108,11 @@ impl App {
         Ok(())
     }
 
-    pub fn set_default_vault(&mut self, vault_id: &str) -> Result<()> {
+    pub fn set_default_vault(&mut self, account_id: &str, vault_id: &str) -> Result<()> {
         if let Some(config) = &mut self.config {
-            config.default_vault_id = Some(vault_id.to_string());
+            config
+                .default_vault_per_account
+                .insert(account_id.to_string(), vault_id.to_string());
             confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
         } else {
             anyhow::bail!("Configuration can't be saved because it is not loaded");
