@@ -206,16 +206,16 @@ impl App {
             bail!("Cannot list vault items when account/vault are not selected");
         }
 
-        let account_uuid = self.selected_account().unwrap().account_uuid.clone();
-        let vault_name = self.selected_vault().unwrap().name.clone();
+        let account_id = self.selected_account().unwrap().account_uuid.clone();
+        let vault_id = self.selected_vault().unwrap().id.clone();
 
         let stdout = self.run_op_command(&[
             "item",
             "list",
             "--account",
-            &account_uuid,
+            &account_id,
             "--vault",
-            &vault_name,
+            &vault_id,
             "--format",
             "json",
         ])?;
@@ -224,7 +224,7 @@ impl App {
             serde_json::from_slice(&stdout).context("Failed to parse vault items JSON")?;
 
         self.command_log.log_success(
-            format!("op item list --vault {}", vault_name),
+            format!("op item list --vault {}", vault_id),
             Some(vault_items.len()),
         );
 
@@ -273,17 +273,17 @@ impl App {
     }
 
     pub fn load_item_details(&mut self, item_id: &str) -> Result<()> {
-        let account_uuid = self.selected_account().unwrap().account_uuid.clone();
-        let vault_name = self.selected_vault().unwrap().name.clone();
+        let account_id = self.selected_account().unwrap().account_uuid.clone();
+        let vault_id = self.selected_vault().unwrap().id.clone();
 
         let stdout = self.run_op_command(&[
             "item",
             "get",
             item_id,
             "--account",
-            &account_uuid,
+            &account_id,
             "--vault",
-            &vault_name,
+            &vault_id,
             "--format",
             "json",
         ])?;
