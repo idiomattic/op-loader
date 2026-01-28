@@ -7,6 +7,11 @@ use std::{collections::HashMap, process::Command};
 
 use crate::command_log::CommandLog;
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct TemplatedFile {
+    pub template_name: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
     #[serde(default)]
@@ -15,6 +20,8 @@ pub struct OpLoadConfig {
     pub default_account_id: Option<String>,
     #[serde(default)]
     pub default_vault_per_account: HashMap<String, String>,
+    #[serde(default)]
+    pub templated_files: HashMap<String, TemplatedFile>,
 }
 
 pub struct App {
