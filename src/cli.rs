@@ -39,10 +39,19 @@ pub enum ConfigAction {
 
 #[derive(Subcommand, Debug)]
 pub enum TemplateAction {
-    Add { path: String },
-    Edit { path: String },
+    /// Add a file to be managed as a template
+    Add {
+        /// Path to the file to manage (e.g., ~/.npmrc)
+        path: String,
+    },
+    /// List all managed template files
     List,
-    Remove { path: String },
+    /// Stop managing a file as a template
+    Remove {
+        /// Path to the managed file
+        path: String,
+    },
+    /// Render all templates (substituting variables)
     Render,
 }
 
@@ -174,12 +183,11 @@ fn expand_path(path: &str) -> Result<PathBuf> {
 }
 
 fn path_to_template_name(path: &Path) -> String {
-    let path_str = path.to_string_lossy();
-    let safe_name: String = path_str
-        .chars()
-        .map(|c| if c == '/' { '_' } else { c })
-        .collect();
-    format!("{}.tmpl", safe_name)
+    let filename = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "template".to_string());
+    format!("{}.tmpl", filename)
 }
 
 pub fn handle_template_action(action: TemplateAction) -> Result<()> {
@@ -187,7 +195,6 @@ pub fn handle_template_action(action: TemplateAction) -> Result<()> {
 
     match action {
         TemplateAction::Add { path } => template_add(&path),
-        TemplateAction::Edit { path } => template_edit(&path),
         TemplateAction::List => template_list(),
         TemplateAction::Remove { path } => template_remove(&path),
         TemplateAction::Render => {
@@ -229,13 +236,27 @@ fn template_add(path: &str) -> Result<()> {
     let template_name = path_to_template_name(&target_path);
     let template_path = templates_dir.join(&template_name);
 
-    std::fs::copy(&target_path, &template_path).with_context(|| {
+    let original_content =
+        std::fs::read_to_string(&target_path).context("Failed to read source file")?;
+
+    let var_names: Vec<String> = config
+        .inject_vars
+        .keys()
+        .map(|k| format!("{{{{{}}}}}", k))
+        .collect();
+
+    let vars_comment = if var_names.is_empty() {
+        "# op-loader: No variables configured yet. Use the TUI to add variables.\n".to_string()
+    } else {
         format!(
-            "Failed to copy {} to {}",
-            target_path.display(),
-            template_path.display()
+            "# op-loader: Available variables: {}\n",
+            var_names.join(", ")
         )
-    })?;
+    };
+
+    let template_content = format!("{}{}", vars_comment, original_content);
+    std::fs::write(&template_path, &template_content)
+        .with_context(|| format!("Failed to write template to {}", template_path.display()))?;
 
     config.templated_files.insert(
         target_key,
@@ -245,89 +266,10 @@ fn template_add(path: &str) -> Result<()> {
     );
     confy::store("op_loader", None, &config).context("Failed to save configuration")?;
 
-    println!("Added template: {}", target_path.display());
+    println!("Added template for: {}", target_path.display());
     println!("Template stored at: {}", template_path.display());
-    println!("\nEdit with: op-loader template edit {}", path);
-
-    Ok(())
-}
-
-fn template_edit(path: &str) -> Result<()> {
-    info!("Editing template for: {}", path);
-
-    let target_path = expand_path(path)?;
-    let target_key = target_path.to_string_lossy().to_string();
-
-    let config: OpLoadConfig =
-        confy::load("op_loader", None).context("Failed to load configuration")?;
-
-    let template_config = config.templated_files.get(&target_key).with_context(|| {
-        format!(
-            "File is not managed as a template: {}",
-            target_path.display()
-        )
-    })?;
-
-    let templates_dir = get_templates_dir()?;
-    let template_path = templates_dir.join(&template_config.template_name);
-
-    if !template_path.exists() {
-        anyhow::bail!("Template file not found: {}", template_path.display());
-    }
-
-    let original_content =
-        std::fs::read_to_string(&template_path).context("Failed to read template file")?;
-
-    let var_names: Vec<String> = config
-        .inject_vars
-        .keys()
-        .map(|k| format!("{{{{{}}}}}", k))
-        .collect();
-
-    let var_list = if var_names.is_empty() {
-        "(none configured - use TUI to add variables)".to_string()
-    } else {
-        var_names.join(", ")
-    };
-
-    let header = format!(
-        "# op-loader: Available variables: {}\n# op-loader: These lines will be removed when template is rendered\n",
-        var_list
-    );
-
-    let content_with_header = format!("{}{}", header, original_content);
-    std::fs::write(&template_path, &content_with_header)
-        .context("Failed to write template file")?;
-
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-
-    let status = std::process::Command::new(&editor)
-        .arg(&template_path)
-        .status()
-        .with_context(|| format!("Failed to open editor: {}", editor))?;
-
-    if !status.success() {
-        anyhow::bail!("Editor exited with non-zero status");
-    }
-
-    let edited_content =
-        std::fs::read_to_string(&template_path).context("Failed to read edited template")?;
-
-    let cleaned_content: String = edited_content
-        .lines()
-        .filter(|line| !line.starts_with("# op-loader:"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let final_content = if edited_content.ends_with('\n') && !cleaned_content.ends_with('\n') {
-        format!("{}\n", cleaned_content)
-    } else {
-        cleaned_content
-    };
-
-    std::fs::write(&template_path, &final_content).context("Failed to save cleaned template")?;
-
-    println!("Template updated: {}", template_path.display());
+    println!("\nAdd {{VAR_NAME}} placeholders to the template file.");
+    println!("Use `op-loader template list` to see configured variables.");
 
     Ok(())
 }
@@ -386,11 +328,15 @@ fn template_remove(path: &str) -> Result<()> {
     if template_path.exists() {
         std::fs::remove_file(&template_path)
             .with_context(|| format!("Failed to delete template: {}", template_path.display()))?;
+        println!("Removed template: {}", template_path.display());
+    } else {
+        println!(
+            "Removed config for: {} (template file was already missing)",
+            target_path.display()
+        );
     }
 
     confy::store("op_loader", None, &config).context("Failed to save configuration")?;
-
-    println!("Removed template: {}", target_path.display());
 
     Ok(())
 }
@@ -513,12 +459,10 @@ mod config_tests {
         );
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unknown config key")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown config key"));
     }
 
     #[test]
@@ -555,10 +499,10 @@ mod template_tests {
         use super::*;
 
         #[test]
-        fn converts_slashes_to_underscores() {
+        fn extracts_filename_from_path() {
             let path = Path::new("/Users/foo/.npmrc");
             let result = path_to_template_name(path);
-            assert_eq!(result, "_Users_foo_.npmrc.tmpl");
+            assert_eq!(result, ".npmrc.tmpl");
         }
 
         #[test]
@@ -572,7 +516,7 @@ mod template_tests {
         fn handles_nested_path() {
             let path = Path::new("/home/user/.config/app/settings.json");
             let result = path_to_template_name(path);
-            assert_eq!(result, "_home_user_.config_app_settings.json.tmpl");
+            assert_eq!(result, "settings.json.tmpl");
         }
     }
 
