@@ -166,9 +166,9 @@ fn get_templates_dir() -> Result<PathBuf> {
 }
 
 fn expand_path(path: &str) -> Result<PathBuf> {
-    let expanded = if path.starts_with("~/") {
+    let expanded = if let Some(suffix) = path.strip_prefix("~/") {
         let home = std::env::var("HOME").context("HOME environment variable not set")?;
-        PathBuf::from(home).join(&path[2..])
+        PathBuf::from(home).join(suffix)
     } else {
         PathBuf::from(path)
     };
