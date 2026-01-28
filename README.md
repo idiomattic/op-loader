@@ -51,10 +51,32 @@ Launch the interactive terminal UI to:
 
 ### Inject Environment Variables
 ```bash
-# `-v` will print info logs about the number of vars loaded
-eval "$(op-loader env -v)"
+eval "$(op-loader env -vv)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
+
+### Template Files
+Some config files (like `~/.npmrc`) don't support environment variable interpolation. Use templates to inject secrets directly into these files.
+
+```bash
+op-loader template add ~/.npmrc
+```
+This copies the file to `~/.config/op_loader/templates/` and adds a comment showing available variables. Edit the template to add `{{VAR_NAME}}` placeholders:
+```
+# op-loader: Available variables: {{GITHUB_TOKEN}}, {{NPM_TOKEN}}
+//registry.npmjs.org/:_authToken={{NPM_TOKEN}}
+```
+
+Templates are rendered automatically when you run `op-loader env`, or manually with:
+```bash
+op-loader template render
+```
+
+Other template commands:
+```bash
+op-loader template list    # Show managed templates
+op-loader template remove ~/.npmrc  # Stop managing a file
+```
 
 ### Configuration
 Show config file location:
@@ -63,7 +85,6 @@ op-loader config path
 ```
 View current settings:
 ```bash
-op-loader config get -k default_vault_id
 op-loader config get -k default_account_id
 ```
 
@@ -78,8 +99,9 @@ Default config location: `~/.config/op_loader/default-config.toml`
 
 #### Available settings
 - `default_account_id`: Auto-select this account on startup
-- `default_vault_id`: Auto-select this vault on startup
+- `default_vault_per_account`: Auto-select vault per account on startup
 - `inject_vars`: Map of environment variable names to 1Password references
+- `templated_files`: Map of file paths to template configurations
 
 ## Privacy
 All secrets are fetched directly from 1Password via the `op` CLI. No secrets are stored locally - only the references (e.g., `op://vault/item/field`) are saved in your config file.
