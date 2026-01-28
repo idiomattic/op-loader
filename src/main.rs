@@ -72,6 +72,7 @@ fn main() -> Result<()> {
     match args.command {
         Some(Command::Config { action }) => cli::handle_config_action(action)?,
         Some(Command::Env) => cli::handle_env_injection()?,
+        Some(Command::Template { action }) => cli::handle_template_action(action)?,
         None => ratatui::run(run_app)?,
     };
     Ok(())
