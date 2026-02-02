@@ -4,7 +4,7 @@ use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::app::{OpLoadConfig, TemplatedFile};
+use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct LegacyOpLoadConfig {
@@ -116,7 +116,7 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
 }
 
 pub fn handle_env_injection() -> Result<()> {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     info!("Loading environment variable mappings");
 
@@ -147,48 +147,55 @@ pub fn handle_env_injection() -> Result<()> {
 
     info!("Processing {} env var mappings", config.inject_vars.len());
 
-    for (env_var_name, var_config) in &config.inject_vars {
-        debug!(
-            "Reading {} from {} (account {})",
-            env_var_name, var_config.op_reference, var_config.account_id
-        );
+    let mut vars_by_account: std::collections::BTreeMap<&str, Vec<(&str, &InjectVarConfig)>> =
+        std::collections::BTreeMap::new();
 
-        let output = Command::new("op")
-            .args([
-                "read",
-                &var_config.op_reference,
-                "--account",
-                &var_config.account_id,
-            ])
-            .output()
-            .with_context(|| {
-                format!(
-                    "Failed to run `op read {} --account {}`",
-                    var_config.op_reference, var_config.account_id
-                )
-            })?;
+    for (env_var_name, var_config) in &config.inject_vars {
+        vars_by_account
+            .entry(var_config.account_id.as_str())
+            .or_default()
+            .push((env_var_name.as_str(), var_config));
+    }
+
+    let mut combined_output = String::new();
+
+    for (account_id, vars) in vars_by_account {
+        let mut input = String::new();
+        for (env_var_name, var_config) in vars {
+            use std::fmt::Write;
+            writeln!(input, "export {env_var_name}='{}'", var_config.op_reference)
+                .with_context(|| "Failed to write env export line")?;
+        }
+
+        let mut child = Command::new("op")
+            .args(["inject", "--account", account_id])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Failed to run `op inject --account {account_id}`"))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin
+                .write_all(input.as_bytes())
+                .with_context(|| "Failed to write to op inject stdin")?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .with_context(|| "Failed to read op inject output")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            debug!(
-                "Failed to read {}: {}",
-                var_config.op_reference,
-                stderr.trim()
-            );
-            eprintln!(
-                "# Warning: Failed to read {} for {}: {}",
-                var_config.op_reference, env_var_name, stderr
-            );
+            eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
             continue;
         }
 
-        let value = String::from_utf8_lossy(&output.stdout);
-        let value = value.trim();
-        debug!("Successfully read value for {env_var_name}");
-
-        let escaped_value = value.replace('\'', "'\"'\"'");
-        println!("export {env_var_name}='{escaped_value}'");
+        combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
     }
+
+    print!("{combined_output}");
 
     info!("Finished processing env var mappings");
 
@@ -390,38 +397,55 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
     let mut resolved_vars: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
+    let mut vars_by_account: std::collections::BTreeMap<&str, Vec<(&str, &InjectVarConfig)>> =
+        std::collections::BTreeMap::new();
+
     for (var_name, var_config) in &config.inject_vars {
-        debug!(
-            "Resolving {} from {} (account {})",
-            var_name, var_config.op_reference, var_config.account_id
-        );
+        vars_by_account
+            .entry(var_config.account_id.as_str())
+            .or_default()
+            .push((var_name.as_str(), var_config));
+    }
+
+    for (account_id, vars) in vars_by_account {
+        let mut input = String::new();
+        for (var_name, var_config) in vars {
+            use std::fmt::Write;
+            writeln!(input, "{var_name}: {}", var_config.op_reference)
+                .with_context(|| "Failed to write template inject input")?;
+        }
 
         let output = Command::new("op")
-            .args([
-                "read",
-                &var_config.op_reference,
-                "--account",
-                &var_config.account_id,
-            ])
-            .output()
-            .with_context(|| {
-                format!(
-                    "Failed to run `op read {} --account {}`",
-                    var_config.op_reference, var_config.account_id
-                )
+            .args(["inject", "--account", account_id])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Failed to run `op inject --account {account_id}`"))
+            .and_then(|mut child| {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    stdin
+                        .write_all(input.as_bytes())
+                        .with_context(|| "Failed to write to op inject stdin")?;
+                }
+                child
+                    .wait_with_output()
+                    .with_context(|| "Failed to read op inject output")
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!(
-                "# Warning: Failed to read {} for {}: {}",
-                var_config.op_reference, var_name, stderr
-            );
+            eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
             continue;
         }
 
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        resolved_vars.insert(var_name.clone(), value);
+        let rendered = String::from_utf8_lossy(&output.stdout);
+        for line in rendered.lines() {
+            if let Some((var_name, value)) = line.split_once(": ") {
+                resolved_vars.insert(var_name.to_string(), value.to_string());
+            }
+        }
     }
 
     for (target_path, template_config) in &config.templated_files {
