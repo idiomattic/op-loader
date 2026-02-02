@@ -16,12 +16,12 @@ enum NavAction {
 }
 
 impl NavAction {
-    fn from_key(code: KeyCode) -> Option<Self> {
+    const fn from_key(code: KeyCode) -> Option<Self> {
         match code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => Some(Self::Up),
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => Some(Self::Down),
+            KeyCode::Up | KeyCode::Char('k' | 'K') => Some(Self::Up),
+            KeyCode::Down | KeyCode::Char('j' | 'J') => Some(Self::Down),
             KeyCode::Enter => Some(Self::Select),
-            KeyCode::Char('q') | KeyCode::Char('Q') => Some(Self::Quit),
+            KeyCode::Char('q' | 'Q') => Some(Self::Quit),
             KeyCode::Char('0') => Some(Self::PanelZero),
             KeyCode::Char('1') => Some(Self::PanelOne),
             KeyCode::Char('2') => Some(Self::PanelTwo),
@@ -40,6 +40,7 @@ pub fn handle_events(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn handle_key_press(app: &mut App, key: KeyEvent) {
     if app.modal_open {
         match key.code {
@@ -54,17 +55,16 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                 }
 
                 if let Some(ref op_reference) = app.modal_field_reference.clone() {
-                    let account_id = match app.selected_account() {
-                        Some(account) => account.account_uuid.as_str(),
-                        None => {
-                            app.error_message = Some("No account selected".to_string());
-                            return;
-                        }
+                    let account_id = if let Some(account) = app.selected_account() {
+                        account.account_uuid.clone()
+                    } else {
+                        app.error_message = Some("No account selected".to_string());
+                        return;
                     };
 
                     match app.save_op_item_config(
                         &app.modal_env_var_name.clone(),
-                        account_id,
+                        &account_id,
                         op_reference,
                     ) {
                         Ok(()) => {
@@ -135,18 +135,15 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                     .and_then(|idx| app.accounts.get(idx))
                     .map(|a| a.account_uuid.clone())
                 {
-                    match app.set_default_account(&selected_account_id) {
-                        Err(e) => {
-                            app.command_log.log_failure(
-                                "Failed to save default account configuration",
-                                e.to_string(),
-                            );
-                        }
-                        Ok(()) => {
-                            app.command_log
-                                .log_success("Saved default account configuration", None);
-                            AccountListNav.on_select(app);
-                        }
+                    if let Err(e) = app.set_default_account(&selected_account_id) {
+                        app.command_log.log_failure(
+                            "Failed to save default account configuration",
+                            e.to_string(),
+                        );
+                    } else {
+                        app.command_log
+                            .log_success("Saved default account configuration", None);
+                        AccountListNav.on_select(app);
                     }
                 }
             }
@@ -158,18 +155,16 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                         .and_then(|idx| app.vaults.get(idx))
                         .map(|v| v.id.clone()),
                 ) {
-                    match app.set_default_vault(&selected_account_id, &selected_vault_id) {
-                        Err(e) => {
-                            app.command_log.log_failure(
-                                "Failed to save default vault configuration",
-                                e.to_string(),
-                            );
-                        }
-                        Ok(()) => {
-                            app.command_log
-                                .log_success("Saved default vault configuration", None);
-                            VaultListNav.on_select(app);
-                        }
+                    if let Err(e) = app.set_default_vault(&selected_account_id, &selected_vault_id)
+                    {
+                        app.command_log.log_failure(
+                            "Failed to save default vault configuration",
+                            e.to_string(),
+                        );
+                    } else {
+                        app.command_log
+                            .log_success("Saved default vault configuration", None);
+                        VaultListNav.on_select(app);
                     }
                 }
             }
@@ -230,7 +225,7 @@ trait ListNav {
         let state = self.list_state(app);
         let idx = state.selected().unwrap_or(0);
         let new_idx = if idx == len - 1 { 0 } else { idx + 1 };
-        state.select(Some(new_idx))
+        state.select(Some(new_idx));
     }
     fn on_select(&self, app: &mut App) {
         let idx = self.list_state(app).selected();
@@ -352,10 +347,9 @@ impl ListNav for VaultItemListNav {
 struct VaultItemDetailNav;
 impl ListNav for VaultItemDetailNav {
     fn len(&self, app: &App) -> usize {
-        app.selected_item_details
-            .as_ref()
-            .map(|d| d.fields.iter().filter(|f| f.label != "notesPlain").count())
-            .unwrap_or(0)
+        app.selected_item_details.as_ref().map_or(0, |d| {
+            d.fields.iter().filter(|f| f.label != "notesPlain").count()
+        })
     }
 
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {

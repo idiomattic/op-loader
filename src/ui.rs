@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{Account, App, FocusedPanel, ItemField, Vault};
+use crate::command_log::CommandLogEntry;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let outer_layout = Layout::default()
@@ -197,7 +198,7 @@ fn render_search_box(frame: &mut Frame, app: &App, area: Rect) {
 
     let text = if app.search_query.is_empty() {
         if is_active {
-            "".to_string()
+            String::new()
         } else {
             "Press / to search".to_string()
         }
@@ -289,7 +290,7 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
         .command_log
         .recent(visible_lines)
         .iter()
-        .map(|entry| entry.display())
+        .map(CommandLogEntry::display)
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -378,7 +379,7 @@ struct AccountListPanel;
 impl ListPanel for AccountListPanel {
     type Item = Account;
 
-    fn title(&self) -> &str {
+    fn title(&self) -> &'static str {
         " [0] Accounts "
     }
     fn title_bottom(&self) -> Option<&str> {
@@ -397,8 +398,7 @@ impl ListPanel for AccountListPanel {
         app.config
             .as_ref()
             .and_then(|c| c.default_account_id.as_ref())
-            .map(|id| id == &item.account_uuid)
-            .unwrap_or(false)
+            .is_some_and(|id| id == &item.account_uuid)
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.account_list_state
@@ -416,7 +416,7 @@ struct VaultListPanel;
 impl ListPanel for VaultListPanel {
     type Item = Vault;
 
-    fn title(&self) -> &str {
+    fn title(&self) -> &'static str {
         " [1] Vaults "
     }
     fn title_bottom(&self) -> Option<&str> {
@@ -439,8 +439,7 @@ impl ListPanel for VaultListPanel {
                     .as_ref()
                     .and_then(|c| c.default_vault_per_account.get(&account_id))
             })
-            .map(|vault_id| vault_id == &item.id)
-            .unwrap_or(false)
+            .is_some_and(|vault_id| vault_id == &item.id)
     }
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
         &mut app.vault_list_state

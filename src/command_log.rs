@@ -16,10 +16,10 @@ pub enum CommandStatus {
 impl CommandLogEntry {
     pub fn display(&self) -> String {
         match &self.status {
-            CommandStatus::Success { item_count } => match item_count {
-                Some(n) => format!("✓ {} ({} items)", self.command, n),
-                None => format!("✓ {}", self.command),
-            },
+            CommandStatus::Success { item_count } => item_count.as_ref().map_or_else(
+                || format!("✓ {}", self.command),
+                |n| format!("✓ {} ({} items)", self.command, n),
+            ),
             CommandStatus::Failed { stderr } => {
                 let first_line = stderr.lines().next().unwrap_or("");
                 format!("✗ {}: {}", self.command, first_line)

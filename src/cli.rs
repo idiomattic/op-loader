@@ -1,9 +1,22 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::{debug, info};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::app::{OpLoadConfig, TemplatedFile};
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct LegacyOpLoadConfig {
+    #[serde(default)]
+    inject_vars: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    default_account_id: Option<String>,
+    #[serde(default)]
+    default_vault_per_account: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    templated_files: std::collections::HashMap<String, TemplatedFile>,
+}
 
 #[derive(Parser)]
 #[command(version)]
@@ -60,11 +73,11 @@ pub fn handle_config_action(action: ConfigAction) -> Result<()> {
 }
 
 fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Path>) -> Result<()> {
-    debug!("Handling config action: {:?}", action);
+    debug!("Handling config action: {action:?}");
 
     match action {
         ConfigAction::Get { key } => {
-            info!("Getting config key: {}", key);
+            info!("Getting config key: {key}");
 
             let config: OpLoadConfig = if let Some(path) = config_path {
                 confy::load_path(path).context("Failed to load configuration")?
@@ -75,10 +88,10 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
 
             match key.as_str() {
                 "default_account_id" => match &config.default_account_id {
-                    Some(preferred_account) => println!("{}", preferred_account),
+                    Some(preferred_account) => println!("{preferred_account}"),
                     None => println!("(not set)"),
                 },
-                _ => anyhow::bail!("Unknown config key: '{}'.", key),
+                _ => anyhow::bail!("Unknown config key: '{key}'."),
             }
             Ok(())
         }
@@ -94,8 +107,8 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
                     .display()
                     .to_string();
 
-                debug!("Config path resolved to: {}", resolved_path);
-                println!("{}", resolved_path);
+                debug!("Config path resolved to: {resolved_path}");
+                println!("{resolved_path}");
             }
             Ok(())
         }
@@ -107,47 +120,78 @@ pub fn handle_env_injection() -> Result<()> {
 
     info!("Loading environment variable mappings");
 
-    let config: OpLoadConfig =
+    let mut config: OpLoadConfig =
         confy::load("op_loader", None).context("Failed to load configuration")?;
     debug!("Config loaded successfully");
 
     if config.inject_vars.is_empty() {
-        info!("No environment variables configured");
-        eprintln!("No environment variables configured. Use the TUI to add mappings.");
+        let legacy: LegacyOpLoadConfig =
+            confy::load("op_loader", None).context("Failed to load configuration")?;
+
+        if legacy.inject_vars.is_empty() {
+            info!("No environment variables configured");
+            eprintln!("No environment variables configured. Use the TUI to add mappings.");
+            return Ok(());
+        }
+
+        eprintln!(
+            "Warning: Legacy inject_vars format detected. Please re-add your environment variable mappings in the TUI."
+        );
+        config.inject_vars.clear();
+        confy::store("op_loader", None, &config).context("Failed to save configuration")?;
+    }
+
+    if config.inject_vars.is_empty() {
         return Ok(());
     }
 
     info!("Processing {} env var mappings", config.inject_vars.len());
 
-    for (env_var_name, op_reference) in &config.inject_vars {
-        debug!("Reading {} from {}", env_var_name, op_reference);
+    for (env_var_name, var_config) in &config.inject_vars {
+        debug!(
+            "Reading {} from {} (account {})",
+            env_var_name, var_config.op_reference, var_config.account_id
+        );
 
         let output = Command::new("op")
-            .args(["read", op_reference])
+            .args([
+                "read",
+                &var_config.op_reference,
+                "--account",
+                &var_config.account_id,
+            ])
             .output()
-            .with_context(|| format!("Failed to run `op read {}`", op_reference))?;
+            .with_context(|| {
+                format!(
+                    "Failed to run `op read {} --account {}`",
+                    var_config.op_reference, var_config.account_id
+                )
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            debug!("Failed to read {}: {}", op_reference, stderr.trim());
+            debug!(
+                "Failed to read {}: {}",
+                var_config.op_reference,
+                stderr.trim()
+            );
             eprintln!(
                 "# Warning: Failed to read {} for {}: {}",
-                op_reference, env_var_name, stderr
+                var_config.op_reference, env_var_name, stderr
             );
             continue;
         }
 
         let value = String::from_utf8_lossy(&output.stdout);
         let value = value.trim();
-        debug!("Successfully read value for {}", env_var_name);
+        debug!("Successfully read value for {env_var_name}");
 
-        let escaped_value = value.replace("'", "'\"'\"'");
-        println!("export {}='{}'", env_var_name, escaped_value);
+        let escaped_value = value.replace('\'', "'\"'\"'");
+        println!("export {env_var_name}='{escaped_value}'");
     }
 
     info!("Finished processing env var mappings");
 
-    // Also render templates
     if !config.templated_files.is_empty() {
         info!("Rendering {} template files", config.templated_files.len());
         render_templates(&config)?;
@@ -183,15 +227,15 @@ fn expand_path(path: &str) -> Result<PathBuf> {
 }
 
 fn path_to_template_name(path: &Path) -> String {
-    let filename = path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "template".to_string());
-    format!("{}.tmpl", filename)
+    let filename = path.file_name().map_or_else(
+        || "template".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
+    format!("{filename}.tmpl")
 }
 
 pub fn handle_template_action(action: TemplateAction) -> Result<()> {
-    debug!("Handling template action: {:?}", action);
+    debug!("Handling template action: {action:?}");
 
     match action {
         TemplateAction::Add { path } => template_add(&path),
@@ -206,7 +250,7 @@ pub fn handle_template_action(action: TemplateAction) -> Result<()> {
 }
 
 fn template_add(path: &str) -> Result<()> {
-    info!("Adding template for: {}", path);
+    info!("Adding template for: {path}");
 
     let target_path = expand_path(path)?;
     let target_key = target_path.to_string_lossy().to_string();
@@ -242,7 +286,7 @@ fn template_add(path: &str) -> Result<()> {
     let var_names: Vec<String> = config
         .inject_vars
         .keys()
-        .map(|k| format!("{{{{{}}}}}", k))
+        .map(|k| format!("{{{{{k}}}}}"))
         .collect();
 
     let vars_comment = if var_names.is_empty() {
@@ -254,16 +298,13 @@ fn template_add(path: &str) -> Result<()> {
         )
     };
 
-    let template_content = format!("{}{}", vars_comment, original_content);
+    let template_content = format!("{vars_comment}{original_content}");
     std::fs::write(&template_path, &template_content)
         .with_context(|| format!("Failed to write template to {}", template_path.display()))?;
 
-    config.templated_files.insert(
-        target_key,
-        TemplatedFile {
-            template_name: template_name.clone(),
-        },
-    );
+    config
+        .templated_files
+        .insert(target_key, TemplatedFile { template_name });
     confy::store("op_loader", None, &config).context("Failed to save configuration")?;
 
     println!("Added template for: {}", target_path.display());
@@ -296,7 +337,7 @@ fn template_list() -> Result<()> {
         } else {
             "✗ (missing)"
         };
-        println!("  {} {}", status, target_path);
+        println!("  {status} {target_path}");
         println!("    └─ {}", template_path.display());
     }
 
@@ -304,7 +345,7 @@ fn template_list() -> Result<()> {
 }
 
 fn template_remove(path: &str) -> Result<()> {
-    info!("Removing template for: {}", path);
+    info!("Removing template for: {path}");
 
     let target_path = expand_path(path)?;
     let target_key = target_path.to_string_lossy().to_string();
@@ -349,19 +390,32 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
     let mut resolved_vars: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
-    for (var_name, op_reference) in &config.inject_vars {
-        debug!("Resolving {} from {}", var_name, op_reference);
+    for (var_name, var_config) in &config.inject_vars {
+        debug!(
+            "Resolving {} from {} (account {})",
+            var_name, var_config.op_reference, var_config.account_id
+        );
 
         let output = Command::new("op")
-            .args(["read", op_reference])
+            .args([
+                "read",
+                &var_config.op_reference,
+                "--account",
+                &var_config.account_id,
+            ])
             .output()
-            .with_context(|| format!("Failed to run `op read {}`", op_reference))?;
+            .with_context(|| {
+                format!(
+                    "Failed to run `op read {} --account {}`",
+                    var_config.op_reference, var_config.account_id
+                )
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!(
                 "# Warning: Failed to read {} for {}: {}",
-                op_reference, var_name, stderr
+                var_config.op_reference, var_name, stderr
             );
             continue;
         }
@@ -402,7 +456,7 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
         }
 
         for (var_name, value) in &resolved_vars {
-            let placeholder = format!("{{{{{}}}}}", var_name);
+            let placeholder = format!("{{{{{var_name}}}}}");
             rendered = rendered.replace(&placeholder, value);
         }
 
@@ -413,9 +467,9 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
         }
 
         std::fs::write(&target, &rendered)
-            .with_context(|| format!("Failed to write to {}", target_path))?;
+            .with_context(|| format!("Failed to write to {target_path}"))?;
 
-        info!("Rendered template: {}", target_path);
+        info!("Rendered template: {target_path}");
     }
 
     Ok(())

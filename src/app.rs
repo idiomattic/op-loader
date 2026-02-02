@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
-use fuzzy_matcher::skim::SkimMatcherV2;
+use anyhow::{Context, Result, bail};
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
@@ -168,7 +168,7 @@ impl App {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             self.command_log.log_failure(&cmd_str, &stderr);
-            bail!("`{}` failed: {}", cmd_str, stderr);
+            bail!("`{cmd_str}` failed: {stderr}");
         }
 
         Ok(output.stdout)
@@ -192,10 +192,10 @@ impl App {
         self.vaults = vaults;
         self.selected_vault_idx = None;
 
-        if !self.vaults.is_empty() {
-            self.vault_list_state.select(Some(0));
-        } else {
+        if self.vaults.is_empty() {
             self.vault_list_state.select(None);
+        } else {
+            self.vault_list_state.select(Some(0));
         }
 
         Ok(())
@@ -251,7 +251,7 @@ impl App {
             serde_json::from_slice(&stdout).context("Failed to parse vault items JSON")?;
 
         self.command_log.log_success(
-            format!("op item list --vault {}", vault_id),
+            format!("op item list --vault {vault_id}"),
             Some(vault_items.len()),
         );
 
@@ -284,10 +284,10 @@ impl App {
             self.filtered_item_indices = scored.into_iter().map(|(idx, _)| idx).collect();
         }
 
-        if !self.filtered_item_indices.is_empty() {
-            self.vault_item_list_state.select(Some(0));
-        } else {
+        if self.filtered_item_indices.is_empty() {
             self.vault_item_list_state.select(None);
+        } else {
+            self.vault_item_list_state.select(Some(0));
         }
         self.selected_vault_item_idx = None;
         self.selected_item_details = None;
@@ -318,10 +318,8 @@ impl App {
         let details: VaultItemDetails =
             serde_json::from_slice(&stdout).context("Failed to parse item details JSON")?;
 
-        self.command_log.log_success(
-            format!("op item get {}", item_id),
-            Some(details.fields.len()),
-        );
+        self.command_log
+            .log_success(format!("op item get {item_id}"), Some(details.fields.len()));
 
         self.selected_item_details = Some(details);
         Ok(())
@@ -354,6 +352,7 @@ pub struct Vault {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(clippy::struct_field_names)]
 pub struct Account {
     pub email: String,
     #[allow(dead_code)]
@@ -418,7 +417,7 @@ pub struct FieldSection {
     pub label: Option<String>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum FocusedPanel {
     AccountList,
     VaultList,
