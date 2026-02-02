@@ -54,7 +54,19 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                 }
 
                 if let Some(ref op_reference) = app.modal_field_reference.clone() {
-                    match app.save_op_item_config(&app.modal_env_var_name.clone(), op_reference) {
+                    let account_id = match app.selected_account() {
+                        Some(account) => account.account_uuid.as_str(),
+                        None => {
+                            app.error_message = Some("No account selected".to_string());
+                            return;
+                        }
+                    };
+
+                    match app.save_op_item_config(
+                        &app.modal_env_var_name.clone(),
+                        account_id,
+                        op_reference,
+                    ) {
                         Ok(()) => {
                             app.command_log.log_success(
                                 format!("Saved {} to config", app.modal_env_var_name),

@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, bail};
-use fuzzy_matcher::FuzzyMatcher;
+use anyhow::{bail, Context, Result};
 use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
@@ -12,10 +12,16 @@ pub struct TemplatedFile {
     pub template_name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectVarConfig {
+    pub account_id: String,
+    pub op_reference: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct OpLoadConfig {
     #[serde(default)]
-    pub inject_vars: HashMap<String, String>,
+    pub inject_vars: HashMap<String, InjectVarConfig>,
     #[serde(default)]
     pub default_account_id: Option<String>,
     #[serde(default)]
@@ -105,11 +111,20 @@ impl App {
         Ok(())
     }
 
-    pub fn save_op_item_config(&mut self, var_name: &str, op_reference: &str) -> Result<()> {
+    pub fn save_op_item_config(
+        &mut self,
+        var_name: &str,
+        account_id: &str,
+        op_reference: &str,
+    ) -> Result<()> {
         if let Some(config) = &mut self.config {
-            config
-                .inject_vars
-                .insert(var_name.to_string(), op_reference.to_string());
+            config.inject_vars.insert(
+                var_name.to_string(),
+                InjectVarConfig {
+                    account_id: account_id.to_string(),
+                    op_reference: op_reference.to_string(),
+                },
+            );
             confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
         } else {
             anyhow::bail!("Configuration can't be saved because it is not loaded");
