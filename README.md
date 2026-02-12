@@ -55,6 +55,13 @@ eval "$(op-loader env -vv)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
 
+To reduce repeated authentication prompts, you can cache `op inject` output per account for a short TTL:
+```bash
+eval "$(op-loader env --cache-ttl 10m)"
+```
+Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`).  DO NOT COMMIT THESE PLAINTEXT CACHE FILES TO VERSION CONTROL.
+This feature may be undesirable for some, but it is not any less-secure than having the secrets available in plaintext in your shell.
+
 ### Template Files
 Some config files (like `~/.npmrc`) don't support environment variable interpolation. Use templates to inject secrets directly into these files.
 
@@ -76,6 +83,17 @@ Other template commands:
 ```bash
 op-loader template list    # Show managed templates
 op-loader template remove ~/.npmrc  # Stop managing a file
+```
+
+### Cache Management
+Clear cached `op inject` output (all accounts):
+```bash
+op-loader cache clear
+```
+
+Clear a single account cache:
+```bash
+op-loader cache clear --account <account_id>
 ```
 
 ### Configuration
@@ -105,6 +123,7 @@ Default config location: `~/.config/op_loader/default-config.toml`
 
 ## Privacy
 All secrets are fetched directly from 1Password via the `op` CLI. No secrets are stored locally - only the references (e.g., `op://vault/item/field`) are saved in your config file.
+If you enable caching with `--cache-ttl`, plaintext `op inject` output is stored temporarily in the cache directory.
 
 ## License
 MIT

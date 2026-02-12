@@ -3,8 +3,13 @@ use clap::{Parser, Subcommand};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
+use crate::cache::{
+    CacheKind, CacheRemoval, cache_dir, cache_file_for_account, ensure_cache_dir,
+    remove_cache_for_account,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct LegacyOpLoadConfig {
@@ -34,7 +39,15 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    Env,
+    Env {
+        /// Cache op inject output per account for this duration (e.g. 30s, 10m, 1h, 2d)
+        #[arg(long, value_name = "DURATION")]
+        cache_ttl: Option<String>,
+    },
+    Cache {
+        #[command(subcommand)]
+        action: CacheAction,
+    },
     Template {
         #[command(subcommand)]
         action: TemplateAction,
@@ -66,6 +79,16 @@ pub enum TemplateAction {
     },
     /// Render all templates (substituting variables)
     Render,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CacheAction {
+    /// Clear cached op inject output
+    Clear {
+        /// Clear cached output for a specific account ID
+        #[arg(long)]
+        account: Option<String>,
+    },
 }
 
 pub fn handle_config_action(action: ConfigAction) -> Result<()> {
@@ -115,9 +138,7 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
     }
 }
 
-pub fn handle_env_injection() -> Result<()> {
-    use std::process::{Command, Stdio};
-
+pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
     info!("Loading environment variable mappings");
 
     let mut config: OpLoadConfig =
@@ -147,17 +168,11 @@ pub fn handle_env_injection() -> Result<()> {
 
     info!("Processing {} env var mappings", config.inject_vars.len());
 
-    let mut vars_by_account: std::collections::BTreeMap<&str, Vec<(&str, &InjectVarConfig)>> =
-        std::collections::BTreeMap::new();
-
-    for (env_var_name, var_config) in &config.inject_vars {
-        vars_by_account
-            .entry(var_config.account_id.as_str())
-            .or_default()
-            .push((env_var_name.as_str(), var_config));
-    }
+    let vars_by_account = group_vars_by_account(&config.inject_vars);
 
     let mut combined_output = String::new();
+
+    let cache_ttl = cache_ttl.map(parse_duration).transpose()?.unwrap_or(None);
 
     for (account_id, vars) in vars_by_account {
         let mut input = String::new();
@@ -167,32 +182,39 @@ pub fn handle_env_injection() -> Result<()> {
                 .with_context(|| "Failed to write env export line")?;
         }
 
-        let mut child = Command::new("op")
-            .args(["inject", "--account", account_id])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("Failed to run `op inject --account {account_id}`"))?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin
-                .write_all(input.as_bytes())
-                .with_context(|| "Failed to write to op inject stdin")?;
+        if let Some(ttl) = cache_ttl {
+            match read_cached_output(account_id, CacheKind::EnvInject, ttl) {
+                Ok(CacheReadOutcome::Hit(cached)) => {
+                    info!("Cache hit for account {account_id}");
+                    combined_output.push_str(&cached);
+                    continue;
+                }
+                Ok(CacheReadOutcome::Expired) => {
+                    info!("Cache expired for account {account_id}");
+                }
+                Ok(CacheReadOutcome::Miss) => {
+                    info!("Cache miss for account {account_id}");
+                }
+                Err(err) => {
+                    eprintln!("# Warning: Failed to read cache for account {account_id}: {err}");
+                }
+            }
         }
 
-        let output = child
-            .wait_with_output()
-            .with_context(|| "Failed to read op inject output")?;
+        match run_op_inject(account_id, &input) {
+            Ok(output) => {
+                combined_output.push_str(&output);
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
-            continue;
+                if cache_ttl.is_some()
+                    && let Err(err) = write_cached_output(account_id, CacheKind::EnvInject, &output)
+                {
+                    eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+                }
+            }
+            Err(err) => {
+                eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
+            }
         }
-
-        combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
     }
 
     print!("{combined_output}");
@@ -201,9 +223,132 @@ pub fn handle_env_injection() -> Result<()> {
 
     if !config.templated_files.is_empty() {
         info!("Rendering {} template files", config.templated_files.len());
-        render_templates(&config)?;
+        render_templates(&config, cache_ttl)?;
     }
 
+    Ok(())
+}
+
+fn run_op_inject(account_id: &str, input: &str) -> Result<String> {
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("op")
+        .args(["inject", "--account", account_id])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to run `op inject --account {account_id}`"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(input.as_bytes())
+            .with_context(|| "Failed to write to op inject stdin")?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .with_context(|| "Failed to read op inject output")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("op inject failed: {stderr}");
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn parse_duration(input: &str) -> Result<Option<Duration>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if trimmed.len() < 2 {
+        anyhow::bail!("Invalid duration '{input}'. Use a number followed by s, m, h, or d.");
+    }
+
+    let (value, unit) = trimmed.split_at(trimmed.len().saturating_sub(1));
+    let amount: u64 = value
+        .parse()
+        .with_context(|| format!("Invalid duration value: {input}"))?;
+
+    let seconds = match unit {
+        "s" => amount,
+        "m" => amount.saturating_mul(60),
+        "h" => amount.saturating_mul(60 * 60),
+        "d" => amount.saturating_mul(60 * 60 * 24),
+        _ => anyhow::bail!("Invalid duration unit in '{input}'. Use s, m, h, or d."),
+    };
+
+    Ok(Some(Duration::from_secs(seconds)))
+}
+
+enum CacheReadOutcome {
+    Hit(String),
+    Miss,
+    Expired,
+}
+
+fn read_cached_output(
+    account_id: &str,
+    kind: CacheKind,
+    ttl: Duration,
+) -> Result<CacheReadOutcome> {
+    let path = cache_file_for_account(account_id, kind)?;
+    let metadata = match std::fs::metadata(&path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CacheReadOutcome::Miss);
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("Failed to read cache metadata: {}", path.display()));
+        }
+    };
+
+    let modified = metadata
+        .modified()
+        .with_context(|| format!("Failed to read cache mtime: {}", path.display()))?;
+
+    let age = modified
+        .elapsed()
+        .unwrap_or_else(|_| Duration::from_secs(0));
+    if age > ttl {
+        return Ok(CacheReadOutcome::Expired);
+    }
+
+    let contents = std::fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read cache file: {}", path.display()))?;
+    Ok(CacheReadOutcome::Hit(contents))
+}
+
+fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    ensure_cache_dir()?;
+    let path = cache_file_for_account(account_id, kind)?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .with_context(|| format!("Failed to open cache file for writing: {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = file.metadata()?.permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&path, perms)
+            .with_context(|| format!("Failed to set cache file permissions: {}", path.display()))?;
+    }
+
+    file.write_all(output.as_bytes())
+        .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
     Ok(())
 }
 
@@ -251,9 +396,72 @@ pub fn handle_template_action(action: TemplateAction) -> Result<()> {
         TemplateAction::Render => {
             let config: OpLoadConfig =
                 confy::load("op_loader", None).context("Failed to load configuration")?;
-            render_templates(&config)
+            render_templates(&config, None)
         }
     }
+}
+
+pub fn handle_cache_action(action: CacheAction) -> Result<()> {
+    debug!("Handling cache action: {action:?}");
+
+    match action {
+        CacheAction::Clear { account } => match account {
+            Some(account_id) => match remove_cache_for_account(&account_id) {
+                Ok(CacheRemoval::Removed) => {
+                    println!("Cleared cache for account {account_id}");
+                }
+                Ok(CacheRemoval::NotFound) => {
+                    println!("No cache found for account {account_id}");
+                }
+                Err(err) => {
+                    eprintln!("Warning: Failed to clear cache for account {account_id}: {err}");
+                }
+            },
+            None => clear_all_caches()?,
+        },
+    }
+
+    Ok(())
+}
+
+fn clear_all_caches() -> Result<()> {
+    let dir = cache_dir()?;
+    if !dir.exists() {
+        println!("No cache directory found.");
+        return Ok(());
+    }
+
+    let mut removed = 0usize;
+    let mut failed = 0usize;
+    let mut saw_file = false;
+    for entry in std::fs::read_dir(&dir)
+        .with_context(|| format!("Failed to read cache directory: {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed += 1,
+            Err(err) => {
+                failed += 1;
+                eprintln!("Warning: Failed to remove {}: {err}", path.display());
+            }
+        }
+        saw_file = true;
+    }
+
+    if !saw_file {
+        println!("No cache files found.");
+        return Ok(());
+    }
+
+    println!(
+        "Cleared {removed} cache file(s).{suffix}",
+        suffix = if failed > 0 { " (some failures)" } else { "" }
+    );
+    Ok(())
 }
 
 fn template_add(path: &str) -> Result<()> {
@@ -389,23 +597,13 @@ fn template_remove(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_templates(config: &OpLoadConfig) -> Result<()> {
-    use std::process::Command;
-
+fn render_templates(config: &OpLoadConfig, cache_ttl: Option<Duration>) -> Result<()> {
     let templates_dir = get_templates_dir()?;
 
     let mut resolved_vars: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
-    let mut vars_by_account: std::collections::BTreeMap<&str, Vec<(&str, &InjectVarConfig)>> =
-        std::collections::BTreeMap::new();
-
-    for (var_name, var_config) in &config.inject_vars {
-        vars_by_account
-            .entry(var_config.account_id.as_str())
-            .or_default()
-            .push((var_name.as_str(), var_config));
-    }
+    let vars_by_account = group_vars_by_account(&config.inject_vars);
 
     for (account_id, vars) in vars_by_account {
         let mut input = String::new();
@@ -415,32 +613,14 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
                 .with_context(|| "Failed to write template inject input")?;
         }
 
-        let output = Command::new("op")
-            .args(["inject", "--account", account_id])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("Failed to run `op inject --account {account_id}`"))
-            .and_then(|mut child| {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    stdin
-                        .write_all(input.as_bytes())
-                        .with_context(|| "Failed to write to op inject stdin")?;
-                }
-                child
-                    .wait_with_output()
-                    .with_context(|| "Failed to read op inject output")
-            })?;
+        let rendered = match load_template_output(account_id, &input, cache_ttl) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
+                continue;
+            }
+        };
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
-            continue;
-        }
-
-        let rendered = String::from_utf8_lossy(&output.stdout);
         for line in rendered.lines() {
             if let Some((var_name, value)) = line.split_once(": ") {
                 resolved_vars.insert(var_name.to_string(), value.to_string());
@@ -497,6 +677,200 @@ fn render_templates(config: &OpLoadConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn fetch_template_output(
+    account_id: &str,
+    input: &str,
+    cache_ttl: Option<Duration>,
+) -> Result<String> {
+    use std::process::Command;
+
+    let output = Command::new("op")
+        .args(["inject", "--account", account_id])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to run `op inject --account {account_id}`"))
+        .and_then(|mut child| {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                stdin
+                    .write_all(input.as_bytes())
+                    .with_context(|| "Failed to write to op inject stdin")?;
+            }
+            child
+                .wait_with_output()
+                .with_context(|| "Failed to read op inject output")
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
+        anyhow::bail!("op inject failed: {stderr}");
+    }
+
+    let rendered = String::from_utf8_lossy(&output.stdout).to_string();
+    if cache_ttl.is_some()
+        && let Err(err) = write_cached_output(account_id, CacheKind::TemplateRender, &rendered)
+    {
+        eprintln!("# Warning: Failed to write template cache for account {account_id}: {err}");
+    }
+
+    Ok(rendered)
+}
+
+fn load_template_output(
+    account_id: &str,
+    input: &str,
+    cache_ttl: Option<Duration>,
+) -> Result<String> {
+    cache_ttl.map_or_else(
+        || fetch_template_output(account_id, input, None),
+        |ttl| match read_cached_output(account_id, CacheKind::TemplateRender, ttl) {
+            Ok(CacheReadOutcome::Hit(cached)) => {
+                info!("Template cache hit for account {account_id}");
+                Ok(cached)
+            }
+            Ok(CacheReadOutcome::Expired) => {
+                info!("Template cache expired for account {account_id}");
+                fetch_template_output(account_id, input, Some(ttl))
+            }
+            Ok(CacheReadOutcome::Miss) => {
+                info!("Template cache miss for account {account_id}");
+                fetch_template_output(account_id, input, Some(ttl))
+            }
+            Err(err) => {
+                eprintln!(
+                    "# Warning: Failed to read template cache for account {account_id}: {err}"
+                );
+                fetch_template_output(account_id, input, Some(ttl))
+            }
+        },
+    )
+}
+
+fn group_vars_by_account<'a>(
+    inject_vars: &'a std::collections::HashMap<String, InjectVarConfig>,
+) -> std::collections::BTreeMap<&'a str, Vec<(&'a str, &'a InjectVarConfig)>> {
+    let mut vars_by_account: std::collections::BTreeMap<
+        &'a str,
+        Vec<(&'a str, &'a InjectVarConfig)>,
+    > = std::collections::BTreeMap::new();
+
+    for (var_name, var_config) in inject_vars {
+        vars_by_account
+            .entry(var_config.account_id.as_str())
+            .or_default()
+            .push((var_name.as_str(), var_config));
+    }
+
+    vars_by_account
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use assert_fs::TempDir;
+    use filetime::FileTime;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(prev) = self.previous.take() {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn cache_write_and_read_hit() {
+        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+
+        let output = "export FOO='bar'\n";
+        write_cached_output("account-1", CacheKind::EnvInject, output).unwrap();
+        let result =
+            read_cached_output("account-1", CacheKind::EnvInject, Duration::from_secs(60)).unwrap();
+
+        match result {
+            CacheReadOutcome::Hit(contents) => assert_eq!(contents, output),
+            _ => panic!("Expected cache hit"),
+        }
+    }
+
+    #[test]
+    fn cache_read_expired_returns_expired() {
+        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+
+        write_cached_output("account-2", CacheKind::EnvInject, "export TOKEN='old'\n").unwrap();
+        let cache_path = cache_file_for_account("account-2", CacheKind::EnvInject).unwrap();
+        let past = std::time::SystemTime::now() - Duration::from_secs(120);
+        filetime::set_file_mtime(&cache_path, FileTime::from_system_time(past)).unwrap();
+
+        let result =
+            read_cached_output("account-2", CacheKind::EnvInject, Duration::from_secs(60)).unwrap();
+
+        assert!(matches!(result, CacheReadOutcome::Expired));
+    }
+
+    #[test]
+    fn cache_read_missing_returns_miss() {
+        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+
+        let result = read_cached_output(
+            "missing-account",
+            CacheKind::EnvInject,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+
+        assert!(matches!(result, CacheReadOutcome::Miss));
+    }
+
+    #[test]
+    fn cache_clear_removes_all_files() {
+        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+
+        write_cached_output("account-a", CacheKind::EnvInject, "export A=1\n").unwrap();
+        let cache_dir = cache_dir().unwrap();
+        std::fs::write(cache_dir.join("extra-file.txt"), "extra").unwrap();
+        std::fs::create_dir_all(cache_dir.join("nested")).unwrap();
+
+        clear_all_caches().unwrap();
+
+        let remaining_files = std::fs::read_dir(cache_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_file())
+            .count();
+        assert_eq!(remaining_files, 0);
+    }
 }
 
 #[cfg(test)]
