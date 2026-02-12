@@ -772,45 +772,114 @@ fn group_vars_by_account<'a>(
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+    use crate::cache::cache_path_for_account;
     use assert_fs::TempDir;
     use filetime::FileTime;
-    use std::sync::{Mutex, OnceLock};
 
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    fn write_cached_output_at(
+        cache_root: &std::path::Path,
+        account_id: &str,
+        kind: CacheKind,
+        output: &str,
+    ) -> Result<()> {
+        use std::fs::OpenOptions;
+        use std::io::Write;
 
-    struct EnvGuard {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
+        std::fs::create_dir_all(cache_root).with_context(|| {
+            format!("Failed to create cache directory: {}", cache_root.display())
+        })?;
+        let path = cache_path_for_account(cache_root, account_id, kind);
 
-    impl EnvGuard {
-        fn set(key: &'static str, value: &std::path::Path) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, previous }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .with_context(|| {
+                format!("Failed to open cache file for writing: {}", path.display())
+            })?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = file.metadata()?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&path, perms).with_context(|| {
+                format!("Failed to set cache file permissions: {}", path.display())
+            })?;
         }
+
+        file.write_all(output.as_bytes())
+            .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
+        Ok(())
     }
 
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            if let Some(prev) = self.previous.take() {
-                std::env::set_var(self.key, prev);
-            } else {
-                std::env::remove_var(self.key);
+    fn read_cached_output_at(
+        cache_root: &std::path::Path,
+        account_id: &str,
+        kind: CacheKind,
+        ttl: Duration,
+    ) -> Result<CacheReadOutcome> {
+        let path = cache_path_for_account(cache_root, account_id, kind);
+        let metadata = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(CacheReadOutcome::Miss);
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Failed to read cache metadata: {}", path.display()));
+            }
+        };
+
+        let modified = metadata
+            .modified()
+            .with_context(|| format!("Failed to read cache mtime: {}", path.display()))?;
+
+        let age = modified
+            .elapsed()
+            .unwrap_or_else(|_| Duration::from_secs(0));
+        if age > ttl {
+            return Ok(CacheReadOutcome::Expired);
+        }
+
+        let contents = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read cache file: {}", path.display()))?;
+        Ok(CacheReadOutcome::Hit(contents))
+    }
+
+    fn clear_all_caches_at(cache_root: &std::path::Path) -> Result<()> {
+        if !cache_root.exists() {
+            return Ok(());
+        }
+
+        for entry in std::fs::read_dir(cache_root)
+            .with_context(|| format!("Failed to read cache directory: {}", cache_root.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("Failed to remove cache file: {}", path.display()))?;
             }
         }
+        Ok(())
     }
 
     #[test]
     fn cache_write_and_read_hit() {
-        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+        let cache_root = temp_dir.path().join("op_loader");
 
         let output = "export FOO='bar'\n";
-        write_cached_output("account-1", CacheKind::EnvInject, output).unwrap();
-        let result =
-            read_cached_output("account-1", CacheKind::EnvInject, Duration::from_secs(60)).unwrap();
+        write_cached_output_at(&cache_root, "account-1", CacheKind::EnvInject, output).unwrap();
+        let result = read_cached_output_at(
+            &cache_root,
+            "account-1",
+            CacheKind::EnvInject,
+            Duration::from_secs(60),
+        )
+        .unwrap();
 
         match result {
             CacheReadOutcome::Hit(contents) => assert_eq!(contents, output),
@@ -820,28 +889,38 @@ mod cache_tests {
 
     #[test]
     fn cache_read_expired_returns_expired() {
-        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+        let cache_root = temp_dir.path().join("op_loader");
 
-        write_cached_output("account-2", CacheKind::EnvInject, "export TOKEN='old'\n").unwrap();
-        let cache_path = cache_file_for_account("account-2", CacheKind::EnvInject).unwrap();
+        write_cached_output_at(
+            &cache_root,
+            "account-2",
+            CacheKind::EnvInject,
+            "export TOKEN='old'\n",
+        )
+        .unwrap();
+        let cache_path = cache_path_for_account(&cache_root, "account-2", CacheKind::EnvInject);
         let past = std::time::SystemTime::now() - Duration::from_secs(120);
         filetime::set_file_mtime(&cache_path, FileTime::from_system_time(past)).unwrap();
 
-        let result =
-            read_cached_output("account-2", CacheKind::EnvInject, Duration::from_secs(60)).unwrap();
+        let result = read_cached_output_at(
+            &cache_root,
+            "account-2",
+            CacheKind::EnvInject,
+            Duration::from_secs(60),
+        )
+        .unwrap();
 
         assert!(matches!(result, CacheReadOutcome::Expired));
     }
 
     #[test]
     fn cache_read_missing_returns_miss() {
-        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+        let cache_root = temp_dir.path().join("op_loader");
 
-        let result = read_cached_output(
+        let result = read_cached_output_at(
+            &cache_root,
             "missing-account",
             CacheKind::EnvInject,
             Duration::from_secs(60),
@@ -853,18 +932,22 @@ mod cache_tests {
 
     #[test]
     fn cache_clear_removes_all_files() {
-        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let _guard = EnvGuard::set("XDG_CACHE_HOME", temp_dir.path());
+        let cache_root = temp_dir.path().join("op_loader");
 
-        write_cached_output("account-a", CacheKind::EnvInject, "export A=1\n").unwrap();
-        let cache_dir = cache_dir().unwrap();
-        std::fs::write(cache_dir.join("extra-file.txt"), "extra").unwrap();
-        std::fs::create_dir_all(cache_dir.join("nested")).unwrap();
+        write_cached_output_at(
+            &cache_root,
+            "account-a",
+            CacheKind::EnvInject,
+            "export A=1\n",
+        )
+        .unwrap();
+        std::fs::write(cache_root.join("extra-file.txt"), "extra").unwrap();
+        std::fs::create_dir_all(cache_root.join("nested")).unwrap();
 
-        clear_all_caches().unwrap();
+        clear_all_caches_at(&cache_root).unwrap();
 
-        let remaining_files = std::fs::read_dir(cache_dir)
+        let remaining_files = std::fs::read_dir(cache_root)
             .unwrap()
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().is_file())

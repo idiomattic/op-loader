@@ -29,13 +29,21 @@ pub fn ensure_cache_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-pub fn cache_file_for_account(account_id: &str, kind: CacheKind) -> Result<PathBuf> {
+pub fn cache_path_for_account(
+    cache_root: &std::path::Path,
+    account_id: &str,
+    kind: CacheKind,
+) -> PathBuf {
     let prefix = match kind {
         CacheKind::EnvInject => "op_inject_env",
         CacheKind::TemplateRender => "op_inject_template",
     };
     let filename = format!("{}_{}.cache", prefix, sanitize_account_id(account_id));
-    Ok(cache_dir()?.join(filename))
+    cache_root.join(filename)
+}
+
+pub fn cache_file_for_account(account_id: &str, kind: CacheKind) -> Result<PathBuf> {
+    Ok(cache_path_for_account(&cache_dir()?, account_id, kind))
 }
 
 pub fn remove_cache_for_account(account_id: &str) -> Result<CacheRemoval> {
