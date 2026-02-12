@@ -5,6 +5,7 @@ use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, process::Command};
 
+use crate::cache::{CacheRemoval, remove_cache_for_account};
 use crate::command_log::CommandLog;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -126,6 +127,21 @@ impl App {
                 },
             );
             confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
+
+            match remove_cache_for_account(account_id) {
+                Ok(CacheRemoval::Removed) => {
+                    self.command_log
+                        .log_success(format!("cache clear {account_id}"), None);
+                }
+                Ok(CacheRemoval::NotFound) => {
+                    self.command_log
+                        .log_success(format!("cache miss {account_id}"), None);
+                }
+                Err(err) => {
+                    self.command_log
+                        .log_failure(format!("cache clear {account_id}"), err.to_string());
+                }
+            }
         } else {
             anyhow::bail!("Configuration can't be saved because it is not loaded");
         }
