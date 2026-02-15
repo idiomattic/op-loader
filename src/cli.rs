@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 use crate::cache::{
-    CacheKind, CacheRemoval, cache_dir, cache_file_for_account, ensure_cache_dir,
-    remove_cache_for_account,
+    CacheKind, CacheRemoval, cache_dir, cache_file_for_account, cache_lock_path_for_account,
+    ensure_cache_dir, remove_cache_for_account,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -183,36 +183,45 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
         }
 
         if let Some(ttl) = cache_ttl {
-            match read_cached_output(account_id, CacheKind::EnvInject, ttl) {
-                Ok(CacheReadOutcome::Hit(cached)) => {
-                    info!("Cache hit for account {account_id}");
-                    combined_output.push_str(&cached);
-                    continue;
-                }
-                Ok(CacheReadOutcome::Expired) => {
-                    info!("Cache expired for account {account_id}");
-                }
-                Ok(CacheReadOutcome::Miss) => {
-                    info!("Cache miss for account {account_id}");
+            if let Ok(Some(cached)) =
+                read_cached_output_if_fresh(account_id, CacheKind::EnvInject, ttl)
+            {
+                info!("Cache hit for account {account_id}");
+                combined_output.push_str(&cached);
+                continue;
+            }
+            try_log_cache_state(account_id, CacheKind::EnvInject, ttl);
+
+            match with_cache_lock(
+                account_id,
+                CacheKind::EnvInject,
+                ttl,
+                Duration::from_secs(5),
+                || run_op_inject(account_id, &input),
+            ) {
+                Ok(output) => {
+                    combined_output.push_str(&output);
+                    if let Err(err) = write_cached_output(account_id, CacheKind::EnvInject, &output)
+                    {
+                        eprintln!(
+                            "# Warning: Failed to write cache for account {account_id}: {err}"
+                        );
+                    }
                 }
                 Err(err) => {
-                    eprintln!("# Warning: Failed to read cache for account {account_id}: {err}");
+                    eprintln!(
+                        "# Warning: Failed to inject secrets for account {account_id}: {err}"
+                    );
                 }
             }
-        }
-
-        match run_op_inject(account_id, &input) {
-            Ok(output) => {
-                combined_output.push_str(&output);
-
-                if cache_ttl.is_some()
-                    && let Err(err) = write_cached_output(account_id, CacheKind::EnvInject, &output)
-                {
-                    eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+        } else {
+            match run_op_inject(account_id, &input) {
+                Ok(output) => combined_output.push_str(&output),
+                Err(err) => {
+                    eprintln!(
+                        "# Warning: Failed to inject secrets for account {account_id}: {err}"
+                    );
                 }
-            }
-            Err(err) => {
-                eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
             }
         }
     }
@@ -324,6 +333,31 @@ fn read_cached_output(
     Ok(CacheReadOutcome::Hit(contents))
 }
 
+fn read_cached_output_if_fresh(
+    account_id: &str,
+    kind: CacheKind,
+    ttl: Duration,
+) -> Result<Option<String>> {
+    match read_cached_output(account_id, kind, ttl)? {
+        CacheReadOutcome::Hit(cached) => Ok(Some(cached)),
+        CacheReadOutcome::Expired | CacheReadOutcome::Miss => Ok(None),
+    }
+}
+
+fn try_log_cache_state(account_id: &str, kind: CacheKind, ttl: Duration) {
+    let prefix = match kind {
+        CacheKind::EnvInject => "Cache",
+        CacheKind::TemplateRender => "Template cache",
+    };
+
+    match read_cached_output(account_id, kind, ttl) {
+        Ok(CacheReadOutcome::Hit(_)) => info!("{prefix} hit for account {account_id}"),
+        Ok(CacheReadOutcome::Expired) => info!("{prefix} expired for account {account_id}"),
+        Ok(CacheReadOutcome::Miss) => info!("{prefix} miss for account {account_id}"),
+        Err(err) => eprintln!("# Warning: Failed to read cache for account {account_id}: {err}"),
+    }
+}
+
 fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -350,6 +384,64 @@ fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Resul
     file.write_all(output.as_bytes())
         .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
     Ok(())
+}
+
+fn with_cache_lock(
+    account_id: &str,
+    kind: CacheKind,
+    ttl: Duration,
+    wait: Duration,
+    action: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    use fs2::FileExt;
+    use std::fs::OpenOptions;
+    use std::time::{Duration as StdDuration, Instant};
+
+    ensure_cache_dir()?;
+    let lock_path = cache_lock_path_for_account(account_id, kind)?;
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open cache lock: {}", lock_path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = lock_file.metadata()?.permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&lock_path, perms).with_context(|| {
+            format!(
+                "Failed to set lock file permissions: {}",
+                lock_path.display()
+            )
+        })?;
+    }
+
+    if lock_file.try_lock_exclusive().is_ok() {
+        let result = action();
+        let _ = lock_file.unlock();
+        return result;
+    }
+
+    let start = Instant::now();
+    let mut attempts = 0u64;
+    while start.elapsed() < wait {
+        attempts = attempts.saturating_add(1);
+        std::thread::sleep(StdDuration::from_millis(100 + (attempts % 4) * 50));
+        if let Some(cached) = read_cached_output_if_fresh(account_id, kind, ttl)? {
+            return Ok(cached);
+        }
+        if lock_file.try_lock_exclusive().is_ok() {
+            let result = action();
+            let _ = lock_file.unlock();
+            return result;
+        }
+    }
+
+    action()
 }
 
 fn get_templates_dir() -> Result<PathBuf> {
@@ -726,29 +818,24 @@ fn load_template_output(
     input: &str,
     cache_ttl: Option<Duration>,
 ) -> Result<String> {
-    cache_ttl.map_or_else(
-        || fetch_template_output(account_id, input, None),
-        |ttl| match read_cached_output(account_id, CacheKind::TemplateRender, ttl) {
-            Ok(CacheReadOutcome::Hit(cached)) => {
-                info!("Template cache hit for account {account_id}");
-                Ok(cached)
-            }
-            Ok(CacheReadOutcome::Expired) => {
-                info!("Template cache expired for account {account_id}");
-                fetch_template_output(account_id, input, Some(ttl))
-            }
-            Ok(CacheReadOutcome::Miss) => {
-                info!("Template cache miss for account {account_id}");
-                fetch_template_output(account_id, input, Some(ttl))
-            }
-            Err(err) => {
-                eprintln!(
-                    "# Warning: Failed to read template cache for account {account_id}: {err}"
-                );
-                fetch_template_output(account_id, input, Some(ttl))
-            }
-        },
-    )
+    if let Some(ttl) = cache_ttl {
+        if let Ok(Some(cached)) =
+            read_cached_output_if_fresh(account_id, CacheKind::TemplateRender, ttl)
+        {
+            info!("Template cache hit for account {account_id}");
+            return Ok(cached);
+        }
+        try_log_cache_state(account_id, CacheKind::TemplateRender, ttl);
+        with_cache_lock(
+            account_id,
+            CacheKind::TemplateRender,
+            ttl,
+            Duration::from_secs(5),
+            || fetch_template_output(account_id, input, Some(ttl)),
+        )
+    } else {
+        fetch_template_output(account_id, input, None)
+    }
 }
 
 fn group_vars_by_account<'a>(

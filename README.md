@@ -60,6 +60,7 @@ To reduce repeated authentication prompts, you can cache `op inject` output per 
 eval "$(op-loader env --cache-ttl 10m)"
 ```
 Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`).  DO NOT COMMIT THESE PLAINTEXT CACHE FILES TO VERSION CONTROL.
+When multiple shells start in parallel, op-loader uses a short per-account lock to avoid duplicate `op inject` calls; if the lock can’t be acquired within ~5 seconds, it falls back to a direct `op inject`.
 This feature may be undesirable for some, but it is not any less-secure than having the secrets available in plaintext in your shell.
 
 ### Template Files
