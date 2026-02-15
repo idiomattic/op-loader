@@ -1,0 +1,11 @@
+[tasks.build]
+run = "cargo build"
+
+[tasks.install]
+run = "cargo install --path ."
+
+[tasks.format-clippy]
+run = "cargo fmt && cargo clippy -- -D clippy::pedantic -D clippy::nursery"
+
+[tasks.release]
+run = "cargo build --release"
