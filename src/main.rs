@@ -3,6 +3,8 @@ mod cache;
 mod cli;
 mod command_log;
 mod event;
+#[cfg(target_os = "macos")]
+mod keychain;
 mod ui;
 
 use anyhow::Result;

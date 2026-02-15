@@ -55,12 +55,17 @@ eval "$(op-loader env -vv)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
 
-To reduce repeated authentication prompts, you can cache `op inject` output per account for a short TTL:
+To reduce repeated authentication prompts, you can cache resolved secrets per account for a short TTL (macOS only):
 ```bash
 eval "$(op-loader env --cache-ttl 10m)"
 ```
-Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`).  DO NOT COMMIT THESE PLAINTEXT CACHE FILES TO VERSION CONTROL.
-When multiple shells start in parallel, op-loader uses a short per-account lock to avoid duplicate `op inject` calls; if the lock can’t be acquired within ~5 seconds, it falls back to a direct `op inject`.
+Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`). On macOS, cached values are encrypted using a key stored in the system Keychain. DO NOT COMMIT THESE CACHE FILES TO VERSION CONTROL.
+
+Caching strategy (macOS only):
+- op-loader resolves each account’s secrets once per run and builds a JSON map of `VAR -> value`.
+- The map is cached per account and reused for both export generation and template rendering.
+- A per-account lock prevents duplicate `op inject` calls when multiple shells start in parallel; if the lock can’t be acquired within ~5 seconds, it falls back to a direct `op inject`.
+
 This feature may be undesirable for some, but it is not any less-secure than having the secrets available in plaintext in your shell.
 
 ### Template Files

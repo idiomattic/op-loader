@@ -9,8 +9,7 @@ pub enum CacheRemoval {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheKind {
-    EnvInject,
-    TemplateRender,
+    ResolvedVars,
 }
 
 pub fn lock_path_for_account(
@@ -19,8 +18,7 @@ pub fn lock_path_for_account(
     kind: CacheKind,
 ) -> PathBuf {
     let prefix = match kind {
-        CacheKind::EnvInject => "op_inject_env",
-        CacheKind::TemplateRender => "op_inject_template",
+        CacheKind::ResolvedVars => "op_inject_vars",
     };
     let filename = format!("{}_{}.lock", prefix, sanitize_account_id(account_id));
     cache_root.join(filename)
@@ -48,8 +46,7 @@ pub fn cache_path_for_account(
     kind: CacheKind,
 ) -> PathBuf {
     let prefix = match kind {
-        CacheKind::EnvInject => "op_inject_env",
-        CacheKind::TemplateRender => "op_inject_template",
+        CacheKind::ResolvedVars => "op_inject_vars",
     };
     let filename = format!("{}_{}.cache", prefix, sanitize_account_id(account_id));
     cache_root.join(filename)
@@ -65,12 +62,8 @@ pub fn cache_lock_path_for_account(account_id: &str, kind: CacheKind) -> Result<
 
 pub fn remove_cache_for_account(account_id: &str) -> Result<CacheRemoval> {
     let mut removed_any = false;
-    for kind in [CacheKind::EnvInject, CacheKind::TemplateRender] {
-        let path = cache_file_for_account(account_id, kind)?;
-        if !path.exists() {
-            continue;
-        }
-
+    let path = cache_file_for_account(account_id, CacheKind::ResolvedVars)?;
+    if path.exists() {
         std::fs::remove_file(&path)
             .with_context(|| format!("Failed to remove cache file: {}", path.display()))?;
         removed_any = true;

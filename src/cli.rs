@@ -1,15 +1,20 @@
 use anyhow::{Context, Result};
+use base64::Engine;
 use clap::{Parser, Subcommand};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rand_core::RngCore;
+
 use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 use crate::cache::{
     CacheKind, CacheRemoval, cache_dir, cache_file_for_account, cache_lock_path_for_account,
     ensure_cache_dir, remove_cache_for_account,
 };
+#[cfg(target_os = "macos")]
+use crate::keychain::{assert_keychain_available, delete_key, get_or_create_key};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct LegacyOpLoadConfig {
@@ -171,6 +176,15 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
     let vars_by_account = group_vars_by_account(&config.inject_vars);
 
     let mut combined_output = String::new();
+    let mut resolved_vars_by_account: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = std::collections::HashMap::new();
+
+    #[cfg(not(target_os = "macos"))]
+    if cache_ttl.is_some() {
+        anyhow::bail!("Cache is only supported on macOS.");
+    }
 
     let cache_ttl = cache_ttl.map(parse_duration).transpose()?.unwrap_or(None);
 
@@ -178,52 +192,20 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
         let mut input = String::new();
         for (env_var_name, var_config) in vars {
             use std::fmt::Write;
-            writeln!(input, "export {env_var_name}='{}'", var_config.op_reference)
-                .with_context(|| "Failed to write env export line")?;
+            writeln!(input, "{env_var_name}: {}", var_config.op_reference)
+                .with_context(|| "Failed to write env inject input")?;
         }
 
-        if let Some(ttl) = cache_ttl {
-            if let Ok(Some(cached)) =
-                read_cached_output_if_fresh(account_id, CacheKind::EnvInject, ttl)
-            {
-                info!("Cache hit for account {account_id}");
-                combined_output.push_str(&cached);
+        let resolved = match load_resolved_vars(account_id, &input, cache_ttl) {
+            Ok(vars) => vars,
+            Err(err) => {
+                eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
                 continue;
             }
-            try_log_cache_state(account_id, CacheKind::EnvInject, ttl);
+        };
 
-            match with_cache_lock(
-                account_id,
-                CacheKind::EnvInject,
-                ttl,
-                Duration::from_secs(5),
-                || run_op_inject(account_id, &input),
-            ) {
-                Ok(output) => {
-                    combined_output.push_str(&output);
-                    if let Err(err) = write_cached_output(account_id, CacheKind::EnvInject, &output)
-                    {
-                        eprintln!(
-                            "# Warning: Failed to write cache for account {account_id}: {err}"
-                        );
-                    }
-                }
-                Err(err) => {
-                    eprintln!(
-                        "# Warning: Failed to inject secrets for account {account_id}: {err}"
-                    );
-                }
-            }
-        } else {
-            match run_op_inject(account_id, &input) {
-                Ok(output) => combined_output.push_str(&output),
-                Err(err) => {
-                    eprintln!(
-                        "# Warning: Failed to inject secrets for account {account_id}: {err}"
-                    );
-                }
-            }
-        }
+        combined_output.push_str(&format_exports(&resolved));
+        resolved_vars_by_account.insert(account_id.to_string(), resolved);
     }
 
     print!("{combined_output}");
@@ -232,7 +214,7 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
 
     if !config.templated_files.is_empty() {
         info!("Rendering {} template files", config.templated_files.len());
-        render_templates(&config, cache_ttl)?;
+        render_templates(&config, &resolved_vars_by_account)?;
     }
 
     Ok(())
@@ -305,6 +287,23 @@ fn read_cached_output(
     kind: CacheKind,
     ttl: Duration,
 ) -> Result<CacheReadOutcome> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        anyhow::bail!("Cache is only supported on macOS.");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        read_cached_output_macos(account_id, kind, ttl)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_cached_output_macos(
+    account_id: &str,
+    kind: CacheKind,
+    ttl: Duration,
+) -> Result<CacheReadOutcome> {
     let path = cache_file_for_account(account_id, kind)?;
     let metadata = match std::fs::metadata(&path) {
         Ok(meta) => meta,
@@ -330,7 +329,22 @@ fn read_cached_output(
 
     let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read cache file: {}", path.display()))?;
-    Ok(CacheReadOutcome::Hit(contents))
+    match decrypt_cache(&contents) {
+        Ok(decrypted) => {
+            let rendered = String::from_utf8_lossy(&decrypted).to_string();
+            Ok(CacheReadOutcome::Hit(rendered))
+        }
+        Err(err) => {
+            eprintln!("# Warning: Failed to decrypt cache for account {account_id}: {err}");
+            if let Err(remove_err) = std::fs::remove_file(&path) {
+                eprintln!(
+                    "# Warning: Failed to remove corrupt cache file {}: {remove_err}",
+                    path.display()
+                );
+            }
+            Ok(CacheReadOutcome::Miss)
+        }
+    }
 }
 
 fn read_cached_output_if_fresh(
@@ -346,8 +360,7 @@ fn read_cached_output_if_fresh(
 
 fn try_log_cache_state(account_id: &str, kind: CacheKind, ttl: Duration) {
     let prefix = match kind {
-        CacheKind::EnvInject => "Cache",
-        CacheKind::TemplateRender => "Template cache",
+        CacheKind::ResolvedVars => "Cache",
     };
 
     match read_cached_output(account_id, kind, ttl) {
@@ -358,12 +371,149 @@ fn try_log_cache_state(account_id: &str, kind: CacheKind, ttl: Duration) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn encrypt_cache(plaintext: &[u8]) -> Result<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+
+    assert_keychain_available()?;
+    let key = get_or_create_key()?;
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+
+    let mut nonce_bytes = [0u8; 12];
+    rand_core::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|err| anyhow::anyhow!("Failed to encrypt cache: {err}"))?;
+
+    let mut payload = Vec::with_capacity(1 + nonce_bytes.len() + ciphertext.len());
+    payload.push(1u8);
+    payload.extend_from_slice(&nonce_bytes);
+    payload.extend_from_slice(&ciphertext);
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(payload))
+}
+
+#[cfg(target_os = "macos")]
+fn decrypt_cache(encoded: &str) -> Result<Vec<u8>> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+
+    assert_keychain_available()?;
+    let key = get_or_create_key()?;
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .context("Failed to decode cache base64")?;
+
+    if payload.len() < 1 + 12 {
+        anyhow::bail!("Invalid cache payload length");
+    }
+
+    if payload[0] != 1u8 {
+        anyhow::bail!("Unsupported cache payload version");
+    }
+
+    let nonce = Nonce::from_slice(&payload[1..13]);
+    let ciphertext = &payload[13..];
+
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|err| anyhow::anyhow!("Failed to decrypt cache: {err}"))
+}
+
 fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        anyhow::bail!("Cache is only supported on macOS.");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        write_cached_output_macos(account_id, kind, output)
+    }
+}
+
+fn load_resolved_vars(
+    account_id: &str,
+    input: &str,
+    cache_ttl: Option<Duration>,
+) -> Result<std::collections::HashMap<String, String>> {
+    if let Some(ttl) = cache_ttl {
+        if let Ok(Some(cached)) =
+            read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
+        {
+            info!("Cache hit for account {account_id}");
+            return parse_cached_vars(&cached);
+        }
+        try_log_cache_state(account_id, CacheKind::ResolvedVars, ttl);
+
+        let resolved_json = with_cache_lock(
+            account_id,
+            CacheKind::ResolvedVars,
+            ttl,
+            Duration::from_secs(5),
+            || resolve_vars_json(account_id, input),
+        )?;
+
+        if let Err(err) = write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json) {
+            eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+        }
+
+        parse_cached_vars(&resolved_json)
+    } else {
+        let resolved_json = resolve_vars_json(account_id, input)?;
+        parse_cached_vars(&resolved_json)
+    }
+}
+
+fn resolve_vars_json(account_id: &str, input: &str) -> Result<String> {
+    let output = run_op_inject(account_id, input)?;
+    let mut vars = std::collections::HashMap::new();
+    for line in output.lines() {
+        if let Some((var_name, value)) = line.split_once(": ") {
+            vars.insert(var_name.to_string(), value.to_string());
+        }
+    }
+    serde_json::to_string(&vars).context("Failed to serialize resolved vars")
+}
+
+fn parse_cached_vars(cached_json: &str) -> Result<std::collections::HashMap<String, String>> {
+    serde_json::from_str(cached_json).context("Failed to parse cached vars")
+}
+
+fn format_exports(vars: &std::collections::HashMap<String, String>) -> String {
+    let mut lines: Vec<(&String, &String)> = vars.iter().collect();
+    lines.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut output = String::new();
+    for (key, value) in lines {
+        let escaped = escape_shell_single_quotes(value);
+        output.push_str("export ");
+        output.push_str(key);
+        output.push_str("='");
+        output.push_str(&escaped);
+        output.push_str("'\n");
+    }
+    output
+}
+
+fn escape_shell_single_quotes(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+
+#[cfg(target_os = "macos")]
+fn write_cached_output_macos(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
     use std::fs::OpenOptions;
     use std::io::Write;
 
     ensure_cache_dir()?;
     let path = cache_file_for_account(account_id, kind)?;
+
+    let encrypted = encrypt_cache(output.as_bytes())?;
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -381,7 +531,7 @@ fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Resul
             .with_context(|| format!("Failed to set cache file permissions: {}", path.display()))?;
     }
 
-    file.write_all(output.as_bytes())
+    file.write_all(encrypted.as_bytes())
         .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
     Ok(())
 }
@@ -488,7 +638,8 @@ pub fn handle_template_action(action: TemplateAction) -> Result<()> {
         TemplateAction::Render => {
             let config: OpLoadConfig =
                 confy::load("op_loader", None).context("Failed to load configuration")?;
-            render_templates(&config, None)
+            let resolved_vars_by_account = std::collections::HashMap::new();
+            render_templates(&config, &resolved_vars_by_account)
         }
     }
 }
@@ -497,20 +648,29 @@ pub fn handle_cache_action(action: CacheAction) -> Result<()> {
     debug!("Handling cache action: {action:?}");
 
     match action {
-        CacheAction::Clear { account } => match account {
-            Some(account_id) => match remove_cache_for_account(&account_id) {
-                Ok(CacheRemoval::Removed) => {
-                    println!("Cleared cache for account {account_id}");
+        CacheAction::Clear { account } => {
+            if let Some(account_id) = account {
+                match remove_cache_for_account(&account_id) {
+                    Ok(CacheRemoval::Removed) => {
+                        println!("Cleared cache for account {account_id}");
+                    }
+                    Ok(CacheRemoval::NotFound) => {
+                        println!("No cache found for account {account_id}");
+                    }
+                    Err(err) => {
+                        eprintln!("Warning: Failed to clear cache for account {account_id}: {err}");
+                    }
                 }
-                Ok(CacheRemoval::NotFound) => {
-                    println!("No cache found for account {account_id}");
+            } else {
+                clear_all_caches()?;
+                #[cfg(target_os = "macos")]
+                {
+                    if let Err(err) = delete_key() {
+                        eprintln!("Warning: Failed to delete cache key from Keychain: {err}");
+                    }
                 }
-                Err(err) => {
-                    eprintln!("Warning: Failed to clear cache for account {account_id}: {err}");
-                }
-            },
-            None => clear_all_caches()?,
-        },
+            }
+        }
     }
 
     Ok(())
@@ -689,36 +849,19 @@ fn template_remove(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_templates(config: &OpLoadConfig, cache_ttl: Option<Duration>) -> Result<()> {
+fn render_templates(
+    config: &OpLoadConfig,
+    resolved_vars_by_account: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    >,
+) -> Result<()> {
     let templates_dir = get_templates_dir()?;
 
-    let mut resolved_vars: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-
-    let vars_by_account = group_vars_by_account(&config.inject_vars);
-
-    for (account_id, vars) in vars_by_account {
-        let mut input = String::new();
-        for (var_name, var_config) in vars {
-            use std::fmt::Write;
-            writeln!(input, "{var_name}: {}", var_config.op_reference)
-                .with_context(|| "Failed to write template inject input")?;
-        }
-
-        let rendered = match load_template_output(account_id, &input, cache_ttl) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
-                continue;
-            }
-        };
-
-        for line in rendered.lines() {
-            if let Some((var_name, value)) = line.split_once(": ") {
-                resolved_vars.insert(var_name.to_string(), value.to_string());
-            }
-        }
-    }
+    let resolved_vars: std::collections::HashMap<String, String> = resolved_vars_by_account
+        .values()
+        .flat_map(|vars| vars.iter().map(|(k, v)| (k.clone(), v.clone())))
+        .collect();
 
     for (target_path, template_config) in &config.templated_files {
         let template_path = templates_dir.join(&template_config.template_name);
@@ -771,73 +914,6 @@ fn render_templates(config: &OpLoadConfig, cache_ttl: Option<Duration>) -> Resul
     Ok(())
 }
 
-fn fetch_template_output(
-    account_id: &str,
-    input: &str,
-    cache_ttl: Option<Duration>,
-) -> Result<String> {
-    use std::process::Command;
-
-    let output = Command::new("op")
-        .args(["inject", "--account", account_id])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .with_context(|| format!("Failed to run `op inject --account {account_id}`"))
-        .and_then(|mut child| {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                stdin
-                    .write_all(input.as_bytes())
-                    .with_context(|| "Failed to write to op inject stdin")?;
-            }
-            child
-                .wait_with_output()
-                .with_context(|| "Failed to read op inject output")
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("# Warning: Failed to inject secrets for account {account_id}: {stderr}");
-        anyhow::bail!("op inject failed: {stderr}");
-    }
-
-    let rendered = String::from_utf8_lossy(&output.stdout).to_string();
-    if cache_ttl.is_some()
-        && let Err(err) = write_cached_output(account_id, CacheKind::TemplateRender, &rendered)
-    {
-        eprintln!("# Warning: Failed to write template cache for account {account_id}: {err}");
-    }
-
-    Ok(rendered)
-}
-
-fn load_template_output(
-    account_id: &str,
-    input: &str,
-    cache_ttl: Option<Duration>,
-) -> Result<String> {
-    if let Some(ttl) = cache_ttl {
-        if let Ok(Some(cached)) =
-            read_cached_output_if_fresh(account_id, CacheKind::TemplateRender, ttl)
-        {
-            info!("Template cache hit for account {account_id}");
-            return Ok(cached);
-        }
-        try_log_cache_state(account_id, CacheKind::TemplateRender, ttl);
-        with_cache_lock(
-            account_id,
-            CacheKind::TemplateRender,
-            ttl,
-            Duration::from_secs(5),
-            || fetch_template_output(account_id, input, Some(ttl)),
-        )
-    } else {
-        fetch_template_output(account_id, input, None)
-    }
-}
-
 fn group_vars_by_account<'a>(
     inject_vars: &'a std::collections::HashMap<String, InjectVarConfig>,
 ) -> std::collections::BTreeMap<&'a str, Vec<(&'a str, &'a InjectVarConfig)>> {
@@ -863,6 +939,7 @@ mod cache_tests {
     use assert_fs::TempDir;
     use filetime::FileTime;
 
+    #[cfg(target_os = "macos")]
     fn write_cached_output_at(
         cache_root: &std::path::Path,
         account_id: &str,
@@ -876,6 +953,7 @@ mod cache_tests {
             format!("Failed to create cache directory: {}", cache_root.display())
         })?;
         let path = cache_path_for_account(cache_root, account_id, kind);
+        let encrypted = super::encrypt_cache(output.as_bytes())?;
 
         let mut file = OpenOptions::new()
             .create(true)
@@ -896,11 +974,12 @@ mod cache_tests {
             })?;
         }
 
-        file.write_all(output.as_bytes())
+        file.write_all(encrypted.as_bytes())
             .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn read_cached_output_at(
         cache_root: &std::path::Path,
         account_id: &str,
@@ -932,9 +1011,12 @@ mod cache_tests {
 
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read cache file: {}", path.display()))?;
-        Ok(CacheReadOutcome::Hit(contents))
+        let decrypted = super::decrypt_cache(&contents)?;
+        let rendered = String::from_utf8_lossy(&decrypted).to_string();
+        Ok(CacheReadOutcome::Hit(rendered))
     }
 
+    #[cfg(target_os = "macos")]
     fn clear_all_caches_at(cache_root: &std::path::Path) -> Result<()> {
         if !cache_root.exists() {
             return Ok(());
@@ -953,17 +1035,18 @@ mod cache_tests {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cache_write_and_read_hit() {
         let temp_dir = TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("op_loader");
 
-        let output = "export FOO='bar'\n";
-        write_cached_output_at(&cache_root, "account-1", CacheKind::EnvInject, output).unwrap();
+        let output = "{\"FOO\":\"bar\"}";
+        write_cached_output_at(&cache_root, "account-1", CacheKind::ResolvedVars, output).unwrap();
         let result = read_cached_output_at(
             &cache_root,
             "account-1",
-            CacheKind::EnvInject,
+            CacheKind::ResolvedVars,
             Duration::from_secs(60),
         )
         .unwrap();
@@ -974,6 +1057,7 @@ mod cache_tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cache_read_expired_returns_expired() {
         let temp_dir = TempDir::new().unwrap();
@@ -982,18 +1066,18 @@ mod cache_tests {
         write_cached_output_at(
             &cache_root,
             "account-2",
-            CacheKind::EnvInject,
-            "export TOKEN='old'\n",
+            CacheKind::ResolvedVars,
+            "{\"TOKEN\":\"old\"}",
         )
         .unwrap();
-        let cache_path = cache_path_for_account(&cache_root, "account-2", CacheKind::EnvInject);
+        let cache_path = cache_path_for_account(&cache_root, "account-2", CacheKind::ResolvedVars);
         let past = std::time::SystemTime::now() - Duration::from_secs(120);
         filetime::set_file_mtime(&cache_path, FileTime::from_system_time(past)).unwrap();
 
         let result = read_cached_output_at(
             &cache_root,
             "account-2",
-            CacheKind::EnvInject,
+            CacheKind::ResolvedVars,
             Duration::from_secs(60),
         )
         .unwrap();
@@ -1001,6 +1085,7 @@ mod cache_tests {
         assert!(matches!(result, CacheReadOutcome::Expired));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cache_read_missing_returns_miss() {
         let temp_dir = TempDir::new().unwrap();
@@ -1009,7 +1094,7 @@ mod cache_tests {
         let result = read_cached_output_at(
             &cache_root,
             "missing-account",
-            CacheKind::EnvInject,
+            CacheKind::ResolvedVars,
             Duration::from_secs(60),
         )
         .unwrap();
@@ -1017,6 +1102,7 @@ mod cache_tests {
         assert!(matches!(result, CacheReadOutcome::Miss));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cache_clear_removes_all_files() {
         let temp_dir = TempDir::new().unwrap();
@@ -1025,8 +1111,8 @@ mod cache_tests {
         write_cached_output_at(
             &cache_root,
             "account-a",
-            CacheKind::EnvInject,
-            "export A=1\n",
+            CacheKind::ResolvedVars,
+            "{\"A\":\"1\"}",
         )
         .unwrap();
         std::fs::write(cache_root.join("extra-file.txt"), "extra").unwrap();
