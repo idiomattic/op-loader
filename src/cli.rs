@@ -1207,6 +1207,41 @@ mod config_tests {
 }
 
 #[cfg(test)]
+mod resolved_vars_tests {
+    use super::*;
+
+    #[test]
+    fn parses_resolved_vars_json() {
+        let json = r#"{"API_KEY":"abc123","URL":"https://example.com"}"#;
+
+        let parsed = parse_cached_vars(json).unwrap();
+
+        assert_eq!(parsed.get("API_KEY"), Some(&"abc123".to_string()));
+        assert_eq!(parsed.get("URL"), Some(&"https://example.com".to_string()));
+    }
+
+    #[test]
+    fn format_exports_escapes_single_quotes() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("TOKEN".to_string(), "a'b".to_string());
+
+        let output = format_exports(&vars);
+
+        assert_eq!(output, "export TOKEN='a'\\''b'\n");
+    }
+
+    #[test]
+    fn format_exports_preserves_colons_and_newlines() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("CONFIG".to_string(), "line1:ok\nline2".to_string());
+
+        let output = format_exports(&vars);
+
+        assert_eq!(output, "export CONFIG='line1:ok\nline2'\n");
+    }
+}
+
+#[cfg(test)]
 mod template_tests {
     use super::*;
 

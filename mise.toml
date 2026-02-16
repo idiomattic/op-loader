@@ -8,7 +8,7 @@ run = "cargo install --path ."
 run = "cargo fmt && cargo clippy -- -D clippy::pedantic -D clippy::nursery"
 
 [tasks.test]
-run = "cargo test {{args}}"
+run = "cargo test {{ args | default(value=\"\") }}"
 
 [tasks.release]
-run = "cargo release {{args}}"
+run = "cargo release {{ args | default(value=\"\") }}"
