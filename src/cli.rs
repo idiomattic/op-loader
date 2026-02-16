@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+#[cfg(target_os = "macos")]
 use base64::Engine;
 use clap::{Parser, Subcommand};
 use log::{debug, info};
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use rand_core::RngCore;
 
 use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
@@ -282,20 +284,22 @@ enum CacheReadOutcome {
     Expired,
 }
 
+#[cfg(not(target_os = "macos"))]
+fn read_cached_output(
+    _account_id: &str,
+    _kind: CacheKind,
+    _ttl: Duration,
+) -> Result<CacheReadOutcome> {
+    anyhow::bail!("Cache is only supported on macOS.");
+}
+
+#[cfg(target_os = "macos")]
 fn read_cached_output(
     account_id: &str,
     kind: CacheKind,
     ttl: Duration,
 ) -> Result<CacheReadOutcome> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        anyhow::bail!("Cache is only supported on macOS.");
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        read_cached_output_macos(account_id, kind, ttl)
-    }
+    read_cached_output_macos(account_id, kind, ttl)
 }
 
 #[cfg(target_os = "macos")]
@@ -425,16 +429,14 @@ fn decrypt_cache(encoded: &str) -> Result<Vec<u8>> {
         .map_err(|err| anyhow::anyhow!("Failed to decrypt cache: {err}"))
 }
 
-fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        anyhow::bail!("Cache is only supported on macOS.");
-    }
+#[cfg(not(target_os = "macos"))]
+fn write_cached_output(_account_id: &str, _kind: CacheKind, _output: &str) -> Result<()> {
+    anyhow::bail!("Cache is only supported on macOS.");
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        write_cached_output_macos(account_id, kind, output)
-    }
+#[cfg(target_os = "macos")]
+fn write_cached_output(account_id: &str, kind: CacheKind, output: &str) -> Result<()> {
+    write_cached_output_macos(account_id, kind, output)
 }
 
 fn load_resolved_vars(
@@ -932,7 +934,7 @@ fn group_vars_by_account<'a>(
     vars_by_account
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod cache_tests {
     use super::*;
     use crate::cache::cache_path_for_account;
