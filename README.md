@@ -51,13 +51,13 @@ Launch the interactive terminal UI to:
 
 ### Inject Environment Variables
 ```bash
-eval "$(op-loader env -vv)"
+eval "$(op-loader env inject -vv)"
 ```
 Reads your configured mappings and outputs `export` statements. Add this to your shell rc file (`.bashrc`, `.zshrc`, etc.) to load secrets on shell startup.
 
 To reduce repeated authentication prompts, you can cache resolved secrets per account for a short TTL (macOS only):
 ```bash
-eval "$(op-loader env --cache-ttl 10m)"
+eval "$(op-loader env inject --cache-ttl 10m)"
 ```
 Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`). On macOS, cached values are encrypted using a key stored in the system Keychain. DO NOT COMMIT THESE CACHE FILES TO VERSION CONTROL.
 
@@ -67,6 +67,13 @@ Caching strategy (macOS only):
 - A per-account lock prevents duplicate `op inject` calls when multiple shells start in parallel; if the lock can’t be acquired within ~5 seconds, it falls back to a direct `op inject`.
 
 This feature may be undesirable for some, but it is not any less-secure than having the secrets available in plaintext in your shell.
+
+### Unset Environment Variables
+It may be desirable to clear all managed environment variables from your shell at times (perhaps when running a coding agent).  To do so:
+```bash
+eval "$(op-loader env unset)"
+```
+This unsets all *managed* environment variables, but not vars otherwise exported in your shell.
 
 ### Template Files
 Some config files (like `~/.npmrc`) don't support environment variable interpolation. Use templates to inject secrets directly into these files.
@@ -80,7 +87,7 @@ This copies the file to `~/.config/op_loader/templates/` and adds a comment show
 //registry.npmjs.org/:_authToken={{NPM_TOKEN}}
 ```
 
-Templates are rendered automatically when you run `op-loader env`, or manually with:
+Templates are rendered automatically when you run `op-loader env inject`, or manually with:
 ```bash
 op-loader template render
 ```
@@ -116,7 +123,7 @@ op-loader config get -k default_account_id
 1. Use the TUI to browse your 1Password vaults and select fields
 2. Map fields to environment variable names (e.g., `op://Personal/GitHub/token` -> `GITHUB_TOKEN`)
 3. Mappings are saved to the config file
-4. Run `eval "$(op-loader env)"` to inject secrets into your shell
+4. Run `eval "$(op-loader env inject)"` to inject secrets into your shell
 
 ### Configuration
 Default config location: `~/.config/op_loader/default-config.toml`

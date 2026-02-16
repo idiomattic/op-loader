@@ -157,6 +157,13 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
     }
 }
 
+pub fn handle_env_action(action: EnvAction) -> Result<()> {
+    match action {
+        EnvAction::Inject { cache_ttl } => handle_env_injection(cache_ttl.as_deref()),
+        EnvAction::Unset => handle_env_unset(),
+    }
+}
+
 pub fn handle_env_unset() -> Result<()> {
     info!("Unsetting managed environment variables");
 

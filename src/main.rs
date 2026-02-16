@@ -74,7 +74,7 @@ fn main() -> Result<()> {
 
     match args.command {
         Some(Command::Config { action }) => cli::handle_config_action(action)?,
-        Some(Command::Env { cache_ttl }) => cli::handle_env_injection(cache_ttl.as_deref())?,
+        Some(Command::Env { action }) => cli::handle_env_action(action)?,
         Some(Command::Cache { action }) => cli::handle_cache_action(action)?,
         Some(Command::Template { action }) => cli::handle_template_action(action)?,
         None => ratatui::run(run_app)?,
