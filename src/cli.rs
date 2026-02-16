@@ -11,9 +11,11 @@ use std::time::Duration;
 use rand_core::RngCore;
 
 use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
+#[cfg(target_os = "macos")]
+use crate::cache::cache_file_for_account;
 use crate::cache::{
-    CacheKind, CacheRemoval, cache_dir, cache_file_for_account, cache_lock_path_for_account,
-    ensure_cache_dir, remove_cache_for_account,
+    CacheKind, CacheRemoval, cache_dir, cache_lock_path_for_account, ensure_cache_dir,
+    remove_cache_for_account,
 };
 #[cfg(target_os = "macos")]
 use crate::keychain::{assert_keychain_available, delete_key, get_or_create_key};
@@ -278,6 +280,7 @@ fn parse_duration(input: &str) -> Result<Option<Duration>> {
     Ok(Some(Duration::from_secs(seconds)))
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum CacheReadOutcome {
     Hit(String),
     Miss,
