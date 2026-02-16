@@ -69,6 +69,7 @@ pub enum EnvAction {
         #[arg(long, value_name = "DURATION")]
         cache_ttl: Option<String>,
     },
+    /// Unset all managed environment variables
     Unset,
 }
 
@@ -154,6 +155,44 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
             Ok(())
         }
     }
+}
+
+pub fn handle_env_unset() -> Result<()> {
+    info!("Unsetting managed environment variables");
+
+    let config: OpLoadConfig =
+        confy::load("op_loader", None).context("Failed to load configuration")?;
+    debug!("Config loaded successfully");
+
+    if config.inject_vars.is_empty() {
+        info!("No managed environment variables configured");
+        return Ok(());
+    }
+
+    info!(
+        "Found {} managed environment variables",
+        config.inject_vars.len()
+    );
+
+    let keys: Vec<&String> = config.inject_vars.keys().collect();
+
+    let output = format_unsets(keys);
+
+    print!("{output}");
+
+    info!("Finished unsetting env var mappings");
+
+    Ok(())
+}
+
+fn format_unsets(keys: Vec<&String>) -> String {
+    let mut output = String::new();
+    for key in keys {
+        output.push_str("unset ");
+        output.push_str(key);
+        output.push_str("\n");
+    }
+    output
 }
 
 pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
