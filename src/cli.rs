@@ -49,9 +49,8 @@ pub enum Command {
         action: ConfigAction,
     },
     Env {
-        /// Cache op inject output per account for this duration (e.g. 30s, 10m, 1h, 2d)
-        #[arg(long, value_name = "DURATION")]
-        cache_ttl: Option<String>,
+        #[command(subcommand)]
+        action: EnvAction,
     },
     Cache {
         #[command(subcommand)]
@@ -61,6 +60,16 @@ pub enum Command {
         #[command(subcommand)]
         action: TemplateAction,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EnvAction {
+    Inject {
+        /// Cache op inject output per account for this duration (e.g. 30s, 10m, 1h, 2d)
+        #[arg(long, value_name = "DURATION")]
+        cache_ttl: Option<String>,
+    },
+    Unset,
 }
 
 #[derive(Subcommand, Debug)]
