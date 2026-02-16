@@ -197,7 +197,7 @@ fn format_unsets(keys: Vec<&String>) -> String {
     for key in keys {
         output.push_str("unset ");
         output.push_str(key);
-        output.push_str("\n");
+        output.push('\n');
     }
     output
 }
