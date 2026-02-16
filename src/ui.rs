@@ -123,6 +123,7 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let block = Block::default()
         .title(" [2] Items ")
+        .title_bottom(Line::from(" [Enter] Select ").right_aligned())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if is_focused {
