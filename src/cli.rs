@@ -1297,6 +1297,31 @@ mod resolved_vars_tests {
 }
 
 #[cfg(test)]
+mod unset_tests {
+    use super::*;
+
+    #[test]
+    fn format_unsets_empty_returns_empty_string() {
+        let keys: Vec<&String> = Vec::new();
+
+        let output = format_unsets(keys);
+
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn format_unsets_emits_unset_lines_in_order() {
+        let var_a = "API_TOKEN".to_string();
+        let var_b = "USER".to_string();
+        let keys = vec![&var_a, &var_b];
+
+        let output = format_unsets(keys);
+
+        assert_eq!(output, "unset API_TOKEN\nunset USER\n");
+    }
+}
+
+#[cfg(test)]
 mod template_tests {
     use super::*;
 
