@@ -68,6 +68,9 @@ pub enum EnvAction {
         /// Cache op inject output per account for this duration (e.g. 30s, 10m, 1h, 2d)
         #[arg(long, value_name = "DURATION")]
         cache_ttl: Option<String>,
+        /// Max time to wait on another process populating the cache (e.g. 5s, 30s, 1m)
+        #[arg(long, value_name = "DURATION", default_value = "5s")]
+        cache_lock_wait: String,
     },
     /// Unset all managed environment variables
     Unset,
@@ -159,7 +162,10 @@ fn handle_config_action_with_path(action: ConfigAction, config_path: Option<&Pat
 
 pub fn handle_env_action(action: EnvAction) -> Result<()> {
     match action {
-        EnvAction::Inject { cache_ttl } => handle_env_injection(cache_ttl.as_deref()),
+        EnvAction::Inject {
+            cache_ttl,
+            cache_lock_wait,
+        } => handle_env_injection(cache_ttl.as_deref(), Some(cache_lock_wait.as_str())),
         EnvAction::Unset => handle_env_unset(),
     }
 }
@@ -202,7 +208,7 @@ fn format_unsets(keys: Vec<&String>) -> String {
     output
 }
 
-pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
+pub fn handle_env_injection(cache_ttl: Option<&str>, cache_lock_wait: Option<&str>) -> Result<()> {
     info!("Loading environment variable mappings");
 
     let mut config: OpLoadConfig =
@@ -246,6 +252,8 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
     }
 
     let cache_ttl = cache_ttl.map(parse_duration).transpose()?.unwrap_or(None);
+    let cache_lock_wait =
+        parse_duration(cache_lock_wait.unwrap_or("5s"))?.unwrap_or_else(|| Duration::from_secs(5));
 
     for (account_id, vars) in vars_by_account {
         let mut input = String::new();
@@ -255,7 +263,7 @@ pub fn handle_env_injection(cache_ttl: Option<&str>) -> Result<()> {
                 .with_context(|| "Failed to write env inject input")?;
         }
 
-        let resolved = match load_resolved_vars(account_id, &input, cache_ttl) {
+        let resolved = match load_resolved_vars(account_id, &input, cache_ttl, cache_lock_wait) {
             Ok(vars) => vars,
             Err(err) => {
                 eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
@@ -501,6 +509,7 @@ fn load_resolved_vars(
     account_id: &str,
     input: &str,
     cache_ttl: Option<Duration>,
+    cache_lock_wait: Duration,
 ) -> Result<std::collections::HashMap<String, String>> {
     if let Some(ttl) = cache_ttl {
         if let Ok(Some(cached)) =
@@ -515,7 +524,7 @@ fn load_resolved_vars(
             account_id,
             CacheKind::ResolvedVars,
             ttl,
-            Duration::from_secs(5),
+            cache_lock_wait,
             || resolve_vars_json(account_id, input),
         )?;
 

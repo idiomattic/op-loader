@@ -59,6 +59,11 @@ To reduce repeated authentication prompts, you can cache resolved secrets per ac
 ```bash
 eval "$(op-loader env inject --cache-ttl 10m)"
 ```
+You can also control how long op-loader waits for another process to populate the cache (defaults to 5s):
+```bash
+eval "$(op-loader env inject --cache-ttl 10m --cache-lock-wait 30s)"
+```
+If you launch multiple shells in parallel (e.g., tmux or zellij layouts), consider increasing the wait to 20-60s to avoid thundering-herd prompts.
 Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader`). On macOS, cached values are encrypted using a key stored in the system Keychain. DO NOT COMMIT THESE CACHE FILES TO VERSION CONTROL.
 
 Caching strategy (macOS only):
