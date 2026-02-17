@@ -12,18 +12,6 @@ pub enum CacheKind {
     ResolvedVars,
 }
 
-pub fn lock_path_for_account(
-    cache_root: &std::path::Path,
-    account_id: &str,
-    kind: CacheKind,
-) -> PathBuf {
-    let prefix = match kind {
-        CacheKind::ResolvedVars => "op_inject_vars",
-    };
-    let filename = format!("{}_{}.lock", prefix, sanitize_account_id(account_id));
-    cache_root.join(filename)
-}
-
 pub fn cache_dir() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
         return Ok(PathBuf::from(dir).join("op_loader"));
@@ -56,8 +44,8 @@ pub fn cache_file_for_account(account_id: &str, kind: CacheKind) -> Result<PathB
     Ok(cache_path_for_account(&cache_dir()?, account_id, kind))
 }
 
-pub fn cache_lock_path_for_account(account_id: &str, kind: CacheKind) -> Result<PathBuf> {
-    Ok(lock_path_for_account(&cache_dir()?, account_id, kind))
+pub fn global_lock_path() -> Result<PathBuf> {
+    Ok(cache_dir()?.join("op_inject_global.lock"))
 }
 
 pub fn remove_cache_for_account(account_id: &str) -> Result<CacheRemoval> {

@@ -14,7 +14,7 @@ use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 #[cfg(target_os = "macos")]
 use crate::cache::cache_file_for_account;
 use crate::cache::{
-    CacheKind, CacheRemoval, cache_dir, cache_lock_path_for_account, ensure_cache_dir,
+    CacheKind, CacheRemoval, cache_dir, ensure_cache_dir, global_lock_path,
     remove_cache_for_account,
 };
 #[cfg(target_os = "macos")]
@@ -512,31 +512,65 @@ fn load_resolved_vars(
     cache_lock_wait: Duration,
 ) -> Result<std::collections::HashMap<String, String>> {
     if let Some(ttl) = cache_ttl {
+        use fs2::FileExt;
         if let Ok(Some(cached)) =
             read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
         {
             info!("Cache hit for account {account_id}");
             return parse_cached_vars(&cached);
         }
+
         try_log_cache_state(account_id, CacheKind::ResolvedVars, ttl);
 
-        let resolved_json = with_cache_lock(
-            account_id,
-            CacheKind::ResolvedVars,
-            ttl,
-            cache_lock_wait,
-            || resolve_vars_json(account_id, input),
-        )?;
-
-        if let Err(err) = write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json) {
-            eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+        let lock_file = open_global_lock_file()?;
+        if lock_file.try_lock_exclusive().is_ok() {
+            let resolved_json = resolve_vars_json(account_id, input)?;
+            if let Err(err) =
+                write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json)
+            {
+                eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+            }
+            let _ = lock_file.unlock();
+            return parse_cached_vars(&resolved_json);
         }
 
-        parse_cached_vars(&resolved_json)
-    } else {
-        let resolved_json = resolve_vars_json(account_id, input)?;
-        parse_cached_vars(&resolved_json)
+        info!(
+            "Waiting for cache lock up to {}s",
+            cache_lock_wait.as_secs()
+        );
+        let start = std::time::Instant::now();
+        let mut attempts = 0u64;
+        while start.elapsed() < cache_lock_wait {
+            attempts = attempts.saturating_add(1);
+            std::thread::sleep(std::time::Duration::from_millis(100 + (attempts % 4) * 50));
+
+            if let Ok(Some(cached)) =
+                read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
+            {
+                info!("Cache hit after wait for account {account_id}");
+                return parse_cached_vars(&cached);
+            }
+
+            if lock_file.try_lock_exclusive().is_ok() {
+                let resolved_json = resolve_vars_json(account_id, input)?;
+                if let Err(err) =
+                    write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json)
+                {
+                    eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
+                }
+                let _ = lock_file.unlock();
+                return parse_cached_vars(&resolved_json);
+            }
+        }
+
+        anyhow::bail!(
+            "Cache lock not acquired within {}s",
+            cache_lock_wait.as_secs()
+        );
     }
+
+    let resolved_json = resolve_vars_json(account_id, input)?;
+    parse_cached_vars(&resolved_json)
 }
 
 fn resolve_vars_json(account_id: &str, input: &str) -> Result<String> {
@@ -605,19 +639,11 @@ fn write_cached_output_macos(account_id: &str, kind: CacheKind, output: &str) ->
     Ok(())
 }
 
-fn with_cache_lock(
-    account_id: &str,
-    kind: CacheKind,
-    ttl: Duration,
-    wait: Duration,
-    action: impl FnOnce() -> Result<String>,
-) -> Result<String> {
-    use fs2::FileExt;
+fn open_global_lock_file() -> Result<std::fs::File> {
     use std::fs::OpenOptions;
-    use std::time::{Duration as StdDuration, Instant};
 
     ensure_cache_dir()?;
-    let lock_path = cache_lock_path_for_account(account_id, kind)?;
+    let lock_path = global_lock_path()?;
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -639,28 +665,7 @@ fn with_cache_lock(
         })?;
     }
 
-    if lock_file.try_lock_exclusive().is_ok() {
-        let result = action();
-        let _ = lock_file.unlock();
-        return result;
-    }
-
-    let start = Instant::now();
-    let mut attempts = 0u64;
-    while start.elapsed() < wait {
-        attempts = attempts.saturating_add(1);
-        std::thread::sleep(StdDuration::from_millis(100 + (attempts % 4) * 50));
-        if let Some(cached) = read_cached_output_if_fresh(account_id, kind, ttl)? {
-            return Ok(cached);
-        }
-        if lock_file.try_lock_exclusive().is_ok() {
-            let result = action();
-            let _ = lock_file.unlock();
-            return result;
-        }
-    }
-
-    action()
+    Ok(lock_file)
 }
 
 fn get_templates_dir() -> Result<PathBuf> {

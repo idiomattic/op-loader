@@ -69,7 +69,7 @@ Cache files are stored under `$XDG_CACHE_HOME/op_loader` (or `~/.cache/op_loader
 Caching strategy (macOS only):
 - op-loader resolves each account’s secrets once per run and builds a JSON map of `VAR -> value`.
 - The map is cached per account and reused for both export generation and template rendering.
-- A per-account lock prevents duplicate `op inject` calls when multiple shells start in parallel; if the lock can’t be acquired within ~5 seconds, it falls back to a direct `op inject`.
+- A global lock prevents duplicate `op inject` calls when multiple shells start in parallel; if the lock can’t be acquired within the wait window, the command returns an error.
 
 This feature may be undesirable for some, but it is not any less-secure than having the secrets available in plaintext in your shell.
 
