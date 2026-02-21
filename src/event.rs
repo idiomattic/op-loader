@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::widgets::ListState;
 
 use crate::app::{App, FocusedPanel};
@@ -42,6 +42,19 @@ pub fn handle_events(app: &mut App) -> Result<()> {
 
 #[allow(clippy::too_many_lines)]
 fn handle_key_press(app: &mut App, key: KeyEvent) {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.confirm_quit = true;
+        return;
+    }
+
+    if app.confirm_quit {
+        match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => app.should_quit = true,
+            _ => app.confirm_quit = false,
+        }
+        return;
+    }
+
     if app.modal_open {
         match key.code {
             KeyCode::Esc => {

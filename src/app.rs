@@ -35,6 +35,7 @@ pub struct App {
     pub config: Option<OpLoadConfig>,
 
     pub should_quit: bool,
+    pub confirm_quit: bool,
     pub focused_panel: FocusedPanel,
     pub error_message: Option<String>,
     pub command_log: CommandLog,
@@ -70,6 +71,7 @@ impl App {
             config: None,
 
             should_quit: false,
+            confirm_quit: false,
             focused_panel: FocusedPanel::VaultList,
             error_message: None,
             command_log: CommandLog::default(),
