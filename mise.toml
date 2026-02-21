@@ -12,3 +12,6 @@ run = "cargo test {{ args | default(value=\"\") }}"
 
 [tasks.release]
 run = "cargo release {{ args | default(value=\"\") }}"
+
+[tools]
+rust = "latest"
