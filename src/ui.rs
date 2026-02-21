@@ -34,7 +34,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_command_log(frame, app, left_pane_layout[2]);
     render_vault_item_panel(frame, app, right_pane_layout[0]);
 
-    if app.modal_open {
+    if app.confirm_quit {
+        render_confirm_quit(frame);
+    } else if app.modal_open {
         render_modal(frame, app);
     }
 }
@@ -373,6 +375,40 @@ fn render_modal(frame: &mut Frame, app: &App) {
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
     frame.render_widget(help, chunks[4]);
+}
+
+fn render_confirm_quit(frame: &mut Frame) {
+    let area = frame.area();
+
+    let modal_width = 40_u16.min(area.width - 4);
+    let modal_height = 5_u16.min(area.height - 4);
+    let modal_x = (area.width - modal_width) / 2;
+    let modal_y = (area.height - modal_height) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .title(" Quit? ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Red));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(inner);
+
+    let prompt = Paragraph::new("Exit op-loader?").alignment(Alignment::Center);
+    frame.render_widget(prompt, chunks[0]);
+
+    let help = Paragraph::new("y/Enter: Quit  |  Any key: Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[1]);
 }
 
 struct AccountListPanel;
