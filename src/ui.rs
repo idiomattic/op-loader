@@ -19,8 +19,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5),
-            Constraint::Min(10),
-            Constraint::Length(10),
+            Constraint::Min(8),
+            Constraint::Length(8),
+            Constraint::Length(8),
         ])
         .split(outer_layout[0]);
 
@@ -31,10 +32,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
-    render_command_log(frame, app, left_pane_layout[2]);
+    render_list_panel(&VarsListPanel, frame, app, left_pane_layout[2]);
+    render_command_log(frame, app, left_pane_layout[3]);
     render_vault_item_panel(frame, app, right_pane_layout[0]);
 
-    if app.modal_open {
+    if app.modal.is_some() {
         render_modal(frame, app);
     }
 }
@@ -59,6 +61,14 @@ trait ListPanel {
 
     fn selected_idx(&self, app: &App) -> Option<usize>;
     fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState;
+
+    fn selection_prefix(&self, _app: &App, _item: &Self::Item, is_selected: bool) -> String {
+        if is_selected {
+            "● ".to_string()
+        } else {
+            "  ".to_string()
+        }
+    }
 }
 
 fn render_list_panel<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, area: Rect) {
@@ -95,7 +105,7 @@ fn render_list_inner<P: ListPanel>(panel: &P, frame: &mut Frame, app: &mut App, 
         .map(|(idx, item)| {
             let is_selected = selected_idx == Some(idx);
             let is_favorite = panel.is_favorite(app, item);
-            let prefix = if is_selected { "● " } else { "  " };
+            let prefix = panel.selection_prefix(app, item, is_selected);
             let suffix = if is_favorite { " ★" } else { "" };
             let content = format!("{}{}{}", prefix, panel.display_item(item), suffix);
 
@@ -300,79 +310,133 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_modal(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    let Some(modal) = app.modal.as_ref() else {
+        return;
+    };
 
-    // Content: field info (5) + spacer (1) + input (3) + error (1) + help (1) = 11, plus border (2) = 13
-    let modal_width = area.width * 60 / 100;
-    let modal_height = 13_u16.min(area.height - 4);
-    let modal_x = (area.width - modal_width) / 2;
-    let modal_y = (area.height - modal_height) / 2;
+    match modal {
+        crate::app::Modal::EnvVar { .. } => {
+            // Content: field info (5) + spacer (1) + input (3) + error (1) + help (1) = 11, plus border (2) = 13
+            let modal_width = area.width * 60 / 100;
+            let modal_height = 13_u16.min(area.height - 4);
+            let modal_x = (area.width - modal_width) / 2;
+            let modal_y = (area.height - modal_height) / 2;
 
-    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+            let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
 
-    frame.render_widget(Clear, modal_area);
+            frame.render_widget(Clear, modal_area);
 
-    let block = Block::default()
-        .title(" Save to Configuration ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow));
+            let block = Block::default()
+                .title(" Save to Configuration ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
 
-    let inner = block.inner(modal_area);
-    frame.render_widget(block, modal_area);
+            let inner = block.inner(modal_area);
+            frame.render_widget(block, modal_area);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // field info
-            Constraint::Length(1), // spacer
-            Constraint::Length(3), // env var input
-            Constraint::Length(1), // error message
-            Constraint::Length(1), // help text
-        ])
-        .split(inner);
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5), // field info
+                    Constraint::Length(1), // spacer
+                    Constraint::Length(3), // env var input
+                    Constraint::Length(1), // error message
+                    Constraint::Length(1), // help text
+                ])
+                .split(inner);
 
-    if let Some(field) = app.modal_selected_field() {
-        let value_display = if field.field_type == "CONCEALED" {
-            "********".to_string()
-        } else {
-            field.value.clone().unwrap_or_default()
-        };
+            if let Some(field) = app.modal_selected_field() {
+                let value_display = if field.field_type == "CONCEALED" {
+                    "********".to_string()
+                } else {
+                    field.value.clone().unwrap_or_default()
+                };
 
-        let info_text = format!(
-            "Field: {}\nValue: {}\n\nReference:\n{}",
-            field.label, value_display, field.reference
-        );
+                let info_text = format!(
+                    "Field: {}\nValue: {}\n\nReference:\n{}",
+                    field.label, value_display, field.reference
+                );
 
-        let info = Paragraph::new(info_text).wrap(Wrap { trim: false });
-        frame.render_widget(info, chunks[0]);
+                let info = Paragraph::new(info_text).wrap(Wrap { trim: false });
+                frame.render_widget(info, chunks[0]);
+            }
+
+            let input_block = Block::default()
+                .title(" Environment Variable Name ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let input_inner = input_block.inner(chunks[2]);
+            frame.render_widget(input_block, chunks[2]);
+
+            let input_text = format!("{}█", app.modal_env_var_name().unwrap_or(""));
+            let input = Paragraph::new(input_text);
+            frame.render_widget(input, input_inner);
+
+            if let Some(ref error) = app.error_message {
+                let error_text = Paragraph::new(error.as_str())
+                    .style(Style::default().fg(Color::Red))
+                    .alignment(Alignment::Center);
+                frame.render_widget(error_text, chunks[3]);
+            }
+
+            let help = Paragraph::new("Enter: Save  |  Esc: Cancel")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center);
+            frame.render_widget(help, chunks[4]);
+        }
+        crate::app::Modal::VarDeleteConfirm { vars } => {
+            let modal_width = area.width * 60 / 100;
+            let modal_height = 11_u16.min(area.height - 4);
+            let modal_x = (area.width - modal_width) / 2;
+            let modal_y = (area.height - modal_height) / 2;
+
+            let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+            frame.render_widget(Clear, modal_area);
+
+            let block = Block::default()
+                .title(" Delete Managed Vars ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let inner = block.inner(modal_area);
+            frame.render_widget(block, modal_area);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            let header = Paragraph::new("Delete these vars?")
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Center);
+            frame.render_widget(header, chunks[0]);
+
+            let vars_text = if vars.is_empty() {
+                "(no vars selected)".to_string()
+            } else {
+                vars.join("\n")
+            };
+            let vars_paragraph = Paragraph::new(vars_text).wrap(Wrap { trim: false });
+            frame.render_widget(vars_paragraph, chunks[1]);
+
+            let help = Paragraph::new("Y: Confirm  |  N/Esc: Cancel")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center);
+            frame.render_widget(help, chunks[2]);
+        }
     }
-
-    let input_block = Block::default()
-        .title(" Environment Variable Name ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let input_inner = input_block.inner(chunks[2]);
-    frame.render_widget(input_block, chunks[2]);
-
-    let input_text = format!("{}█", app.modal_env_var_name);
-    let input = Paragraph::new(input_text);
-    frame.render_widget(input, input_inner);
-
-    if let Some(ref error) = app.error_message {
-        let error_text = Paragraph::new(error.as_str())
-            .style(Style::default().fg(Color::Red))
-            .alignment(Alignment::Center);
-        frame.render_widget(error_text, chunks[3]);
-    }
-
-    let help = Paragraph::new("Enter: Save  |  Esc: Cancel")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[4]);
 }
 
 struct AccountListPanel;
@@ -450,5 +514,51 @@ impl ListPanel for VaultListPanel {
     }
     fn selected_idx(&self, app: &App) -> Option<usize> {
         app.selected_vault_idx
+    }
+}
+
+struct VarsListPanel;
+
+impl ListPanel for VarsListPanel {
+    type Item = String;
+
+    fn title(&self) -> &'static str {
+        " [v] Managed Vars "
+    }
+
+    fn title_bottom(&self) -> Option<&str> {
+        Some(" [Space] Select  [c] Copy  [d] Delete ")
+    }
+
+    fn focus_variant(&self) -> FocusedPanel {
+        FocusedPanel::VarsList
+    }
+
+    fn items<'a>(&self, app: &'a App) -> &'a [String] {
+        &app.managed_vars
+    }
+
+    fn display_item(&self, item: &Self::Item) -> String {
+        item.clone()
+    }
+
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.managed_vars_list_state
+    }
+
+    fn selected_color(&self) -> Color {
+        Color::Cyan
+    }
+
+    fn selected_idx(&self, app: &App) -> Option<usize> {
+        app.managed_vars_list_state.selected()
+    }
+
+    fn selection_prefix(&self, app: &App, item: &Self::Item, _is_selected: bool) -> String {
+        if app.managed_vars_selected.contains(item) {
+            "✓ ".to_string()
+        } else {
+            "  ".to_string()
+        }
     }
 }
