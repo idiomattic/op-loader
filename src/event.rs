@@ -166,6 +166,12 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                         Ok(()) => {
                             app.command_log
                                 .log_success(format!("Saved {env_var_name} to config"), None);
+                            app.load_managed_vars();
+                            if app.managed_vars_list_state.selected().is_none()
+                                && !app.managed_vars.is_empty()
+                            {
+                                app.managed_vars_list_state.select(Some(0));
+                            }
                             app.close_modal();
                         }
                         Err(e) => app.error_message = Some(e.to_string()),
