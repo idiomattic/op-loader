@@ -73,11 +73,7 @@ fn handle_vars_action(app: &mut App, action: VarsAction) {
             }
 
             vars.sort();
-            let payload = vars
-                .iter()
-                .map(|v| format!("{{{{{v}}}}}"))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let payload = vars.join(", ");
 
             match copy_to_clipboard(&payload) {
                 Ok(()) => app.command_log.log_success("Vars copied", None),
@@ -308,8 +304,7 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
             NavAction::PanelFour => app.focused_panel = FocusedPanel::VaultItemDetail,
             NavAction::PanelVars => {
                 app.focused_panel = FocusedPanel::VarsList;
-                if app.managed_vars_list_state.selected().is_none()
-                    && !app.managed_vars.is_empty()
+                if app.managed_vars_list_state.selected().is_none() && !app.managed_vars.is_empty()
                 {
                     app.managed_vars_list_state.select(Some(0));
                 }

@@ -27,14 +27,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let right_pane_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Percentage(66),
+            Constraint::Percentage(34),
+        ])
         .split(outer_layout[1]);
 
     render_list_panel(&AccountListPanel, frame, app, left_pane_layout[0]);
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
     render_list_panel(&VarsListPanel, frame, app, left_pane_layout[2]);
     render_command_log(frame, app, left_pane_layout[3]);
-    render_vault_item_panel(frame, app, right_pane_layout[0]);
+    render_right_column_header(frame, right_pane_layout[0]);
+    render_vault_item_panel(frame, app, right_pane_layout[1]);
+    render_item_details_panel(frame, app, right_pane_layout[2]);
 
     if app.modal.is_some() {
         render_modal(frame, app);
@@ -133,7 +139,6 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let block = Block::default()
         .title(" [2] Items ")
-        .title_bottom(Line::from(" [Enter] Select ").right_aligned())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if is_focused {
@@ -147,16 +152,30 @@ fn render_vault_item_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(3),
-            Constraint::Percentage(50),
-        ])
+        .constraints([Constraint::Fill(1), Constraint::Length(3)])
         .split(inner);
 
     render_filtered_vault_items(frame, app, chunks[0]);
     render_search_box(frame, app, chunks[1]);
-    render_item_details(frame, app, chunks[2]);
+}
+
+fn render_item_details_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let is_focused = app.focused_panel == FocusedPanel::VaultItemDetail;
+
+    let block = Block::default()
+        .title(" [3] Details ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    render_item_details(frame, app, inner);
 }
 
 fn render_filtered_vault_items(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -230,24 +249,9 @@ fn render_search_box(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_item_details(frame: &mut Frame, app: &mut App, area: Rect) {
-    let is_focused = app.focused_panel == FocusedPanel::VaultItemDetail;
-
-    let block = Block::default()
-        .title(" [3] Details ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(if is_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default()
-        });
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     let Some(details) = &app.selected_item_details else {
         let empty = Paragraph::new("Select an item and press Enter");
-        frame.render_widget(empty, inner);
+        frame.render_widget(empty, area);
         return;
     };
 
@@ -286,7 +290,7 @@ fn render_item_details(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(list, inner, &mut app.item_detail_list_state);
+    frame.render_stateful_widget(list, area, &mut app.item_detail_list_state);
 }
 
 fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
@@ -307,6 +311,14 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
 
     let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
 
+    frame.render_widget(paragraph, area);
+}
+
+fn render_right_column_header(frame: &mut Frame, area: Rect) {
+    let text = "[Enter] Select  [k/Up] Up  [j/Down] Down";
+    let paragraph = Paragraph::new(text)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Right);
     frame.render_widget(paragraph, area);
 }
 
@@ -527,7 +539,7 @@ impl ListPanel for VarsListPanel {
     }
 
     fn title_bottom(&self) -> Option<&str> {
-        Some(" [Space] Select  [c] Copy  [d] Delete ")
+        Some(" [Space] Select  [c] Copy Name  [d] Delete ")
     }
 
     fn focus_variant(&self) -> FocusedPanel {
