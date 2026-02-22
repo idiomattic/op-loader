@@ -3,7 +3,7 @@ use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, process::Command};
+use std::{collections::HashMap, collections::HashSet, process::Command};
 
 use crate::cache::{CacheRemoval, remove_cache_for_account};
 use crate::command_log::CommandLog;
@@ -31,6 +31,17 @@ pub struct OpLoadConfig {
     pub templated_files: HashMap<String, TemplatedFile>,
 }
 
+#[derive(Debug, Clone)]
+pub enum Modal {
+    EnvVar {
+        env_var_name: String,
+        field_reference: String,
+    },
+    VarDeleteConfirm {
+        vars: Vec<String>,
+    },
+}
+
 pub struct App {
     pub config: Option<OpLoadConfig>,
 
@@ -52,6 +63,10 @@ pub struct App {
     pub selected_vault_item_idx: Option<usize>,
     pub selected_item_details: Option<VaultItemDetails>,
 
+    pub managed_vars: Vec<String>,
+    pub managed_vars_selected: HashSet<String>,
+    pub managed_vars_list_state: ListState,
+
     pub item_detail_list_state: ListState,
     pub selected_field_idx: Option<usize>,
 
@@ -59,9 +74,7 @@ pub struct App {
     pub search_active: bool,
     pub filtered_item_indices: Vec<usize>,
 
-    pub modal_open: bool,
-    pub modal_env_var_name: String,
-    pub modal_field_reference: Option<String>,
+    pub modal: Option<Modal>,
 }
 
 impl App {
@@ -87,6 +100,10 @@ impl App {
             selected_vault_item_idx: None,
             selected_item_details: None,
 
+            managed_vars: Vec::new(),
+            managed_vars_selected: HashSet::new(),
+            managed_vars_list_state: ListState::default(),
+
             item_detail_list_state: ListState::default(),
             selected_field_idx: None,
 
@@ -94,9 +111,7 @@ impl App {
             search_active: false,
             filtered_item_indices: Vec::new(),
 
-            modal_open: false,
-            modal_env_var_name: String::new(),
-            modal_field_reference: None,
+            modal: None,
         }
     }
 
@@ -108,6 +123,7 @@ impl App {
         };
 
         self.config = Some(config);
+        self.load_managed_vars();
 
         Ok(())
     }
@@ -342,22 +358,122 @@ impl App {
     }
 
     pub fn open_modal(&mut self, field_reference: String) {
-        self.modal_open = true;
-        self.modal_env_var_name.clear();
-        self.modal_field_reference = Some(field_reference);
+        self.modal = Some(Modal::EnvVar {
+            env_var_name: String::new(),
+            field_reference,
+        });
+    }
+
+    pub fn open_vars_delete_modal(&mut self, vars: Vec<String>) {
+        self.modal = Some(Modal::VarDeleteConfirm { vars });
     }
 
     pub fn close_modal(&mut self) {
-        self.modal_open = false;
-        self.modal_env_var_name.clear();
-        self.modal_field_reference = None;
+        self.modal = None;
         self.error_message = None;
     }
 
     pub fn modal_selected_field(&self) -> Option<&ItemField> {
         let details = self.selected_item_details.as_ref()?;
-        let reference = self.modal_field_reference.as_ref()?;
-        details.fields.iter().find(|f| &f.reference == reference)
+        let Modal::EnvVar {
+            field_reference, ..
+        } = self.modal.as_ref()?
+        else {
+            return None;
+        };
+        details
+            .fields
+            .iter()
+            .find(|f| &f.reference == field_reference)
+    }
+
+    pub const fn modal_env_var_name_mut(&mut self) -> Option<&mut String> {
+        match self.modal {
+            Some(Modal::EnvVar {
+                ref mut env_var_name,
+                ..
+            }) => Some(env_var_name),
+            _ => None,
+        }
+    }
+
+    pub fn modal_env_var_name(&self) -> Option<&str> {
+        match self.modal.as_ref()? {
+            Modal::EnvVar { env_var_name, .. } => Some(env_var_name.as_str()),
+            Modal::VarDeleteConfirm { .. } => None,
+        }
+    }
+
+    pub fn modal_field_reference(&self) -> Option<&str> {
+        match self.modal.as_ref()? {
+            Modal::EnvVar {
+                field_reference, ..
+            } => Some(field_reference.as_str()),
+            Modal::VarDeleteConfirm { .. } => None,
+        }
+    }
+
+    pub fn modal_vars_delete_targets(&self) -> Option<&[String]> {
+        match self.modal.as_ref()? {
+            Modal::VarDeleteConfirm { vars } => Some(vars.as_slice()),
+            Modal::EnvVar { .. } => None,
+        }
+    }
+
+    pub fn load_managed_vars(&mut self) {
+        if let Some(config) = self.config.as_ref() {
+            self.managed_vars = config.inject_vars.keys().cloned().collect();
+            self.managed_vars.sort();
+        } else {
+            self.managed_vars.clear();
+        }
+    }
+
+    pub fn selected_managed_var(&self) -> Option<&String> {
+        self.managed_vars_list_state
+            .selected()
+            .and_then(|idx| self.managed_vars.get(idx))
+    }
+
+    pub fn toggle_managed_var_selection(&mut self, var: &str) {
+        if self.managed_vars_selected.contains(var) {
+            self.managed_vars_selected.remove(var);
+        } else {
+            self.managed_vars_selected.insert(var.to_string());
+        }
+    }
+
+    pub fn remove_managed_vars(&mut self, vars: &[String]) -> Result<()> {
+        let config = self
+            .config
+            .as_mut()
+            .context("Configuration can't be saved because it is not loaded")?;
+
+        for var in vars {
+            if let Some(entry) = config.inject_vars.remove(var) {
+                match remove_cache_for_account(&entry.account_id) {
+                    Ok(CacheRemoval::Removed) => {
+                        self.command_log
+                            .log_success(format!("cache clear {}", entry.account_id), None);
+                    }
+                    Ok(CacheRemoval::NotFound) => {
+                        self.command_log
+                            .log_success(format!("cache miss {}", entry.account_id), None);
+                    }
+                    Err(err) => {
+                        self.command_log.log_failure(
+                            format!("cache clear {}", entry.account_id),
+                            err.to_string(),
+                        );
+                    }
+                }
+            }
+        }
+
+        confy::store("op_loader", None, &*config).context("Failed to save configuration")?;
+        self.managed_vars_selected.retain(|var| !vars.contains(var));
+        self.load_managed_vars();
+        Ok(())
     }
 }
 
@@ -439,6 +555,7 @@ pub enum FocusedPanel {
     VaultList,
     VaultItemList,
     VaultItemDetail,
+    VarsList,
 }
 
 #[cfg(test)]
@@ -600,19 +717,34 @@ mod tests {
 
             app.open_modal(reference.clone());
 
-            assert!(app.modal_open);
-            assert_eq!(app.modal_field_reference, Some(reference));
-            assert!(app.modal_env_var_name.is_empty());
+            let Modal::EnvVar {
+                env_var_name,
+                field_reference,
+            } = app.modal.as_ref().expect("modal should be set")
+            else {
+                panic!("expected EnvVar modal");
+            };
+
+            assert!(env_var_name.is_empty());
+            assert_eq!(field_reference, &reference);
         }
 
         #[test]
         fn clears_previous_env_var_name() {
             let mut app = App::new();
-            app.modal_env_var_name = "OLD_VAR".to_string();
+            app.modal = Some(Modal::EnvVar {
+                env_var_name: "OLD_VAR".to_string(),
+                field_reference: "op://vault/item/old".to_string(),
+            });
 
             app.open_modal("op://vault/item/field".to_string());
 
-            assert!(app.modal_env_var_name.is_empty());
+            let Modal::EnvVar { env_var_name, .. } =
+                app.modal.as_ref().expect("modal should be set")
+            else {
+                panic!("expected EnvVar modal");
+            };
+            assert!(env_var_name.is_empty());
         }
     }
 
@@ -622,16 +754,15 @@ mod tests {
         #[test]
         fn resets_all_modal_state() {
             let mut app = App::new();
-            app.modal_open = true;
-            app.modal_env_var_name = "MY_VAR".to_string();
-            app.modal_field_reference = Some("op://vault/item/field".to_string());
+            app.modal = Some(Modal::EnvVar {
+                env_var_name: "MY_VAR".to_string(),
+                field_reference: "op://vault/item/field".to_string(),
+            });
             app.error_message = Some("some error".to_string());
 
             app.close_modal();
 
-            assert!(!app.modal_open);
-            assert!(app.modal_env_var_name.is_empty());
-            assert!(app.modal_field_reference.is_none());
+            assert!(app.modal.is_none());
             assert!(app.error_message.is_none());
         }
     }
@@ -652,7 +783,10 @@ mod tests {
                     make_item_field("password", "op://vault/item/password"),
                 ],
             });
-            app.modal_field_reference = Some(reference);
+            app.modal = Some(Modal::EnvVar {
+                env_var_name: String::new(),
+                field_reference: reference,
+            });
 
             let field = app.modal_selected_field();
 
@@ -664,7 +798,10 @@ mod tests {
         fn returns_none_when_no_details() {
             let mut app = App::new();
             app.selected_item_details = None;
-            app.modal_field_reference = Some("op://vault/item/field".to_string());
+            app.modal = Some(Modal::EnvVar {
+                env_var_name: String::new(),
+                field_reference: "op://vault/item/field".to_string(),
+            });
 
             assert!(app.modal_selected_field().is_none());
         }
@@ -678,7 +815,7 @@ mod tests {
                 category: "LOGIN".to_string(),
                 fields: vec![make_item_field("password", "op://vault/item/password")],
             });
-            app.modal_field_reference = None;
+            app.modal = None;
 
             assert!(app.modal_selected_field().is_none());
         }
@@ -692,7 +829,10 @@ mod tests {
                 category: "LOGIN".to_string(),
                 fields: vec![make_item_field("password", "op://vault/item/password")],
             });
-            app.modal_field_reference = Some("op://vault/item/nonexistent".to_string());
+            app.modal = Some(Modal::EnvVar {
+                env_var_name: String::new(),
+                field_reference: "op://vault/item/nonexistent".to_string(),
+            });
 
             assert!(app.modal_selected_field().is_none());
         }

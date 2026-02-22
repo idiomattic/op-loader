@@ -13,6 +13,7 @@ enum NavAction {
     PanelOne,
     PanelTwo,
     PanelFour,
+    PanelVars,
 }
 
 impl NavAction {
@@ -26,8 +27,99 @@ impl NavAction {
             KeyCode::Char('1') => Some(Self::PanelOne),
             KeyCode::Char('2') => Some(Self::PanelTwo),
             KeyCode::Char('3') => Some(Self::PanelFour),
+            KeyCode::Char('v' | 'V') => Some(Self::PanelVars),
             _ => None,
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+enum VarsAction {
+    Toggle,
+    Copy,
+    Delete,
+}
+
+impl VarsAction {
+    const fn from_key(code: KeyCode) -> Option<Self> {
+        match code {
+            KeyCode::Char(' ') => Some(Self::Toggle),
+            KeyCode::Char('c' | 'C') => Some(Self::Copy),
+            KeyCode::Char('d' | 'D') => Some(Self::Delete),
+            _ => None,
+        }
+    }
+}
+
+fn handle_vars_action(app: &mut App, action: VarsAction) {
+    match action {
+        VarsAction::Toggle => {
+            if let Some(var) = app.selected_managed_var() {
+                let var = var.clone();
+                app.toggle_managed_var_selection(&var);
+            }
+        }
+        VarsAction::Copy => {
+            let mut vars: Vec<String> = if app.managed_vars_selected.is_empty() {
+                app.selected_managed_var().cloned().into_iter().collect()
+            } else {
+                app.managed_vars_selected.iter().cloned().collect()
+            };
+
+            if vars.is_empty() {
+                app.command_log
+                    .log_failure("Vars copy", "No vars selected".to_string());
+                return;
+            }
+
+            vars.sort();
+            let payload = vars.join(", ");
+
+            match copy_to_clipboard(&payload) {
+                Ok(()) => app.command_log.log_success("Vars copied", None),
+                Err(err) => app.command_log.log_failure("Vars copy", err.to_string()),
+            }
+        }
+        VarsAction::Delete => {
+            let vars: Vec<String> = if app.managed_vars_selected.is_empty() {
+                app.selected_managed_var().cloned().into_iter().collect()
+            } else {
+                app.managed_vars_selected.iter().cloned().collect()
+            };
+
+            if vars.is_empty() {
+                app.command_log
+                    .log_failure("Vars delete", "No vars selected".to_string());
+                return;
+            }
+
+            let mut vars = vars;
+            vars.sort();
+            app.open_vars_delete_modal(vars);
+        }
+    }
+}
+
+fn copy_to_clipboard(value: &str) -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .context("Failed to launch pbcopy")?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(value.as_bytes())
+            .context("Failed to write to pbcopy")?;
+    }
+
+    let status = child.wait().context("Failed to wait for pbcopy")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("pbcopy exited with status {status}")
     }
 }
 
@@ -42,19 +134,23 @@ pub fn handle_events(app: &mut App) -> Result<()> {
 
 #[allow(clippy::too_many_lines)]
 fn handle_key_press(app: &mut App, key: KeyEvent) {
-    if app.modal_open {
-        match key.code {
-            KeyCode::Esc => {
-                app.close_modal();
-            }
-            KeyCode::Enter => {
-                if app.modal_env_var_name.is_empty() {
-                    app.error_message =
-                        Some("Environment variable name cannot be empty".to_string());
-                    return;
-                }
+    if let Some(modal) = app.modal.clone() {
+        match modal {
+            crate::app::Modal::EnvVar { .. } => match key.code {
+                KeyCode::Esc => app.close_modal(),
+                KeyCode::Enter => {
+                    let env_var_name = app.modal_env_var_name().unwrap_or("").to_string();
+                    if env_var_name.is_empty() {
+                        app.error_message =
+                            Some("Environment variable name cannot be empty".to_string());
+                        return;
+                    }
 
-                if let Some(ref op_reference) = app.modal_field_reference.clone() {
+                    let op_reference = match app.modal_field_reference() {
+                        Some(reference) => reference.to_string(),
+                        None => return,
+                    };
+
                     let account_id = if let Some(account) = app.selected_account() {
                         account.account_uuid.clone()
                     } else {
@@ -62,33 +158,53 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
                         return;
                     };
 
-                    match app.save_op_item_config(
-                        &app.modal_env_var_name.clone(),
-                        &account_id,
-                        op_reference,
-                    ) {
+                    match app.save_op_item_config(&env_var_name, &account_id, &op_reference) {
                         Ok(()) => {
-                            app.command_log.log_success(
-                                format!("Saved {} to config", app.modal_env_var_name),
-                                None,
-                            );
+                            app.command_log
+                                .log_success(format!("Saved {env_var_name} to config"), None);
+                            app.load_managed_vars();
+                            if app.managed_vars_list_state.selected().is_none()
+                                && !app.managed_vars.is_empty()
+                            {
+                                app.managed_vars_list_state.select(Some(0));
+                            }
                             app.close_modal();
                         }
                         Err(e) => app.error_message = Some(e.to_string()),
                     }
                 }
-            }
-            KeyCode::Backspace => {
-                app.modal_env_var_name.pop();
-                app.error_message = None;
-            }
-            KeyCode::Char(c) => {
-                if c.is_ascii_alphanumeric() || c == '_' {
-                    app.modal_env_var_name.push(c.to_ascii_uppercase());
-                    app.error_message = None;
+                KeyCode::Backspace => {
+                    if let Some(env_var_name) = app.modal_env_var_name_mut() {
+                        env_var_name.pop();
+                        app.error_message = None;
+                    }
                 }
-            }
-            _ => {}
+                KeyCode::Char(c) => {
+                    if (c.is_ascii_alphanumeric() || c == '_')
+                        && let Some(env_var_name) = app.modal_env_var_name_mut()
+                    {
+                        env_var_name.push(c.to_ascii_uppercase());
+                        app.error_message = None;
+                    }
+                }
+                _ => {}
+            },
+            crate::app::Modal::VarDeleteConfirm { .. } => match key.code {
+                KeyCode::Esc | KeyCode::Char('n' | 'N') => app.close_modal(),
+                KeyCode::Char('y' | 'Y') => {
+                    if let Some(vars) = app.modal_vars_delete_targets() {
+                        let vars = vars.to_vec();
+                        match app.remove_managed_vars(&vars) {
+                            Ok(()) => {
+                                app.command_log.log_success("Vars removed", None);
+                                app.close_modal();
+                            }
+                            Err(err) => app.error_message = Some(err.to_string()),
+                        }
+                    }
+                }
+                _ => {}
+            },
         }
         return;
     }
@@ -122,6 +238,13 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
             || app.focused_panel == FocusedPanel::VaultItemDetail)
     {
         app.search_active = true;
+        return;
+    }
+
+    if app.focused_panel == FocusedPanel::VarsList
+        && let Some(action) = VarsAction::from_key(key.code)
+    {
+        handle_vars_action(app, action);
         return;
     }
 
@@ -179,12 +302,20 @@ fn handle_key_press(app: &mut App, key: KeyEvent) {
             NavAction::PanelOne => app.focused_panel = FocusedPanel::VaultList,
             NavAction::PanelTwo => app.focused_panel = FocusedPanel::VaultItemList,
             NavAction::PanelFour => app.focused_panel = FocusedPanel::VaultItemDetail,
+            NavAction::PanelVars => {
+                app.focused_panel = FocusedPanel::VarsList;
+                if app.managed_vars_list_state.selected().is_none() && !app.managed_vars.is_empty()
+                {
+                    app.managed_vars_list_state.select(Some(0));
+                }
+            }
             nav_action => {
                 let nav: &dyn ListNav = match app.focused_panel {
                     FocusedPanel::AccountList => &AccountListNav,
                     FocusedPanel::VaultList => &VaultListNav,
                     FocusedPanel::VaultItemList => &VaultItemListNav,
                     FocusedPanel::VaultItemDetail => &VaultItemDetailNav,
+                    FocusedPanel::VarsList => &VarsListNav,
                 };
 
                 match nav_action {
@@ -377,5 +508,25 @@ impl ListNav for VaultItemDetailNav {
                 app.open_modal(field.reference.clone());
             }
         }
+    }
+}
+
+struct VarsListNav;
+
+impl ListNav for VarsListNav {
+    fn len(&self, app: &App) -> usize {
+        app.managed_vars.len()
+    }
+
+    fn list_state<'a>(&self, app: &'a mut App) -> &'a mut ListState {
+        &mut app.managed_vars_list_state
+    }
+
+    fn set_selected_idx(&self, app: &mut App, idx: Option<usize>) {
+        app.managed_vars_list_state.select(idx);
+    }
+
+    fn on_select(&self, _app: &mut App) {
+        // No-op: cursor position is enough for vars actions.
     }
 }
