@@ -404,7 +404,7 @@ fn render_modal(frame: &mut Frame, app: &App) {
         }
         crate::app::Modal::VarDeleteConfirm { vars } => {
             let modal_width = area.width * 60 / 100;
-            let modal_height = 11_u16.min(area.height - 4);
+            let modal_height = 7_u16.min(area.height - 4);
             let modal_x = (area.width - modal_width) / 2;
             let modal_y = (area.height - modal_height) / 2;
 
@@ -425,7 +425,7 @@ fn render_modal(frame: &mut Frame, app: &App) {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(1),
-                    Constraint::Min(3),
+                    Constraint::Min(1),
                     Constraint::Length(1),
                 ])
                 .split(inner);
