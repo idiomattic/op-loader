@@ -28,9 +28,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let right_pane_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
             Constraint::Percentage(66),
             Constraint::Percentage(34),
+            Constraint::Length(1),
         ])
         .split(outer_layout[1]);
 
@@ -38,9 +38,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_list_panel(&VaultListPanel, frame, app, left_pane_layout[1]);
     render_list_panel(&VarsListPanel, frame, app, left_pane_layout[2]);
     render_command_log(frame, app, left_pane_layout[3]);
-    render_right_column_header(frame, right_pane_layout[0]);
-    render_vault_item_panel(frame, app, right_pane_layout[1]);
-    render_item_details_panel(frame, app, right_pane_layout[2]);
+    render_vault_item_panel(frame, app, right_pane_layout[0]);
+    render_item_details_panel(frame, app, right_pane_layout[1]);
+    render_right_column_footer(frame, right_pane_layout[2]);
 
     if app.modal.is_some() {
         render_modal(frame, app);
@@ -314,8 +314,8 @@ fn render_command_log(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_right_column_header(frame: &mut Frame, area: Rect) {
-    let text = "[Enter] Select  [k/Up] Up  [j/Down] Down";
+fn render_right_column_footer(frame: &mut Frame, area: Rect) {
+    let text = "[Enter] Select  [k/Up] Up  [j/Down] Down  [q] Quit ";
     let paragraph = Paragraph::new(text)
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Right);
