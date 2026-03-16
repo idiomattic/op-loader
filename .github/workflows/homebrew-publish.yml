@@ -1,34 +1,163 @@
-name: Publish-Release
+name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
 permissions:
   contents: write
+
 jobs:
   create-release:
-    name: Create GitHub Release
+    name: Create Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          generate_release_notes: true
-  update-homebrew:
-    name: Update Homebrew formula
-    runs-on: ubuntu-latest
+
+      - name: Get the release version from the tag
+        run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+
+      - name: Check that tag version and Cargo.toml version are the same
+        run: |
+          if ! grep -q "version = \"${VERSION#v}\"" Cargo.toml; then
+            echo "version does not match Cargo.toml" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$VERSION" --draft --verify-tag --title "$VERSION" --generate-notes
+
+    outputs:
+      version: ${{ env.VERSION }}
+
+  build-release:
+    name: Build ${{ matrix.target }}
     needs: create-release
+    runs-on: macos-latest
+    env:
+      RUST_BACKTRACE: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+          - target: aarch64-apple-darwin
+
     steps:
-      - uses: Justintime50/homebrew-releaser@v1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          toolchain: stable
+          targets: ${{ matrix.target }}
 
-          homebrew_owner: idiomattic
-          homebrew_tap: homebrew-op-loader
-          formula_folder: Formula
+      - name: Build release binary
+        run: cargo build --verbose --release --target ${{ matrix.target }}
 
-          install: 'system "cargo", "install", *std_cargo_args'
-          test: 'assert_match version.to_s, shell_output("#{bin}/op-loader --version")'
+      - name: Strip binary
+        run: strip "target/${{ matrix.target }}/release/op-loader"
 
-          depends_on: '"rust" => :build'
+      - name: Build archive
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          archive="op-loader-${version}-${{ matrix.target }}"
+
+          mkdir -p "$archive"
+          cp README.md LICENSE* "$archive/" 2>/dev/null || true
+          cp "target/${{ matrix.target }}/release/op-loader" "$archive/"
+
+          tar czf "$archive.tar.gz" "$archive"
+          shasum -a 256 "$archive.tar.gz" > "$archive.tar.gz.sha256"
+
+          echo "ASSET=$archive.tar.gz" >> $GITHUB_ENV
+          echo "ASSET_SUM=$archive.tar.gz.sha256" >> $GITHUB_ENV
+
+      - name: Upload release archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          gh release upload "$version" "${{ env.ASSET }}" "${{ env.ASSET_SUM }}"
+
+  publish-release:
+    name: Publish Release & Update Homebrew
+    needs: [create-release, build-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: idiomattic/homebrew-op-loader
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Publish GitHub release (remove draft)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ needs.create-release.outputs.version }}" \
+            --draft=false \
+            --repo "${{ github.repository }}"
+
+      - name: Download SHA256 files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          gh release download "$version" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.sha256"
+
+      - name: Update Homebrew formula
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          version_bare="${version#v}"
+          repo="idiomattic/op-loader"
+
+          sha256_intel=$(awk '{print $1}' "op-loader-${version}-x86_64-apple-darwin.tar.gz.sha256")
+          sha256_arm=$(awk '{print $1}' "op-loader-${version}-aarch64-apple-darwin.tar.gz.sha256")
+
+          url_base="https://github.com/${repo}/releases/download/${version}"
+
+          cat > Formula/op-loader.rb <<EOF
+          class OpLoader < Formula
+            desc "TUI for configuring 1password secrets for injection into your shell environment"
+            homepage "https://github.com/${repo}"
+            version "${version_bare}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.intel?
+                url "${url_base}/op-loader-${version}-x86_64-apple-darwin.tar.gz"
+                sha256 "${sha256_intel}"
+              end
+              if Hardware::CPU.arm?
+                url "${url_base}/op-loader-${version}-aarch64-apple-darwin.tar.gz"
+                sha256 "${sha256_arm}"
+              end
+            end
+
+            def install
+              bin.install "op-loader"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/op-loader --version")
+            end
+          end
+          EOF
+
+          # Remove leading whitespace from heredoc indentation
+          sed -i 's/^          //' Formula/op-loader.rb
+
+      - name: Commit and push updated formula
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/op-loader.rb
+          git commit -m "Update op-loader to ${{ needs.create-release.outputs.version }}"
+          git push
