@@ -14,8 +14,8 @@ use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 #[cfg(target_os = "macos")]
 use crate::cache::cache_file_for_account;
 use crate::cache::{
-    CacheKind, CacheRemoval, cache_dir, ensure_cache_dir, global_lock_path,
-    remove_cache_for_account,
+    cache_dir, ensure_cache_dir, lock_path_for_account, remove_cache_for_account, CacheKind,
+    CacheRemoval,
 };
 #[cfg(target_os = "macos")]
 use crate::keychain::{assert_keychain_available, delete_key, get_or_create_key};
@@ -512,7 +512,7 @@ fn load_resolved_vars(
     cache_lock_wait: Duration,
 ) -> Result<std::collections::HashMap<String, String>> {
     if let Some(ttl) = cache_ttl {
-        use fs2::FileExt;
+        // Fast path: check cache before acquiring any lock.
         if let Ok(Some(cached)) =
             read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
         {
@@ -522,55 +522,78 @@ fn load_resolved_vars(
 
         try_log_cache_state(account_id, CacheKind::ResolvedVars, ttl);
 
-        let lock_file = open_global_lock_file()?;
-        if lock_file.try_lock_exclusive().is_ok() {
-            let resolved_json = resolve_vars_json(account_id, input)?;
-            if let Err(err) =
-                write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json)
-            {
-                eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
-            }
+        // Acquire per-account exclusive lock with timeout.
+        let lock_file = open_lock_file_for_account(account_id)?;
+        let acquired = lock_exclusive_with_timeout(&lock_file, cache_lock_wait)?;
+        if !acquired {
+            anyhow::bail!(
+                "Cache lock for account {account_id} not acquired within {}s",
+                cache_lock_wait.as_secs()
+            );
+        }
+
+        // Double-check: another process may have populated the cache while
+        // we were waiting on the lock.
+        if let Ok(Some(cached)) =
+            read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
+        {
+            info!("Cache hit (after lock) for account {account_id}");
             let _ = lock_file.unlock();
-            return parse_cached_vars(&resolved_json);
+            return parse_cached_vars(&cached);
         }
 
-        info!(
-            "Waiting for cache lock up to {}s",
-            cache_lock_wait.as_secs()
-        );
-        let start = std::time::Instant::now();
-        let mut attempts = 0u64;
-        while start.elapsed() < cache_lock_wait {
-            attempts = attempts.saturating_add(1);
-            std::thread::sleep(std::time::Duration::from_millis(100 + (attempts % 4) * 50));
-
-            if let Ok(Some(cached)) =
-                read_cached_output_if_fresh(account_id, CacheKind::ResolvedVars, ttl)
-            {
-                info!("Cache hit after wait for account {account_id}");
-                return parse_cached_vars(&cached);
-            }
-
-            if lock_file.try_lock_exclusive().is_ok() {
-                let resolved_json = resolve_vars_json(account_id, input)?;
-                if let Err(err) =
-                    write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json)
-                {
-                    eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
-                }
-                let _ = lock_file.unlock();
-                return parse_cached_vars(&resolved_json);
-            }
+        // Cache is stale/missing and we hold the lock — resolve via op inject.
+        let resolved_json = resolve_vars_json(account_id, input)?;
+        if let Err(err) = write_cached_output(account_id, CacheKind::ResolvedVars, &resolved_json) {
+            eprintln!("# Warning: Failed to write cache for account {account_id}: {err}");
         }
-
-        anyhow::bail!(
-            "Cache lock not acquired within {}s",
-            cache_lock_wait.as_secs()
-        );
+        let _ = lock_file.unlock();
+        return parse_cached_vars(&resolved_json);
     }
 
     let resolved_json = resolve_vars_json(account_id, input)?;
     parse_cached_vars(&resolved_json)
+}
+
+/// Attempt to acquire an exclusive lock on `file`, blocking up to `timeout`.
+///
+/// Returns `Ok(true)` if the lock was acquired, `Ok(false)` if the timeout
+/// elapsed. Uses a background thread so the caller's thread can enforce
+/// the deadline.
+fn lock_exclusive_with_timeout(file: &std::fs::File, timeout: Duration) -> Result<bool> {
+    use fs2::FileExt;
+    use std::sync::mpsc;
+
+    // First try a non-blocking acquire — avoids spawning a thread when
+    // the lock is uncontended (the common case).
+    if file.try_lock_exclusive().is_ok() {
+        return Ok(true);
+    }
+
+    info!("Lock contended, waiting up to {}s", timeout.as_secs());
+
+    // Clone the file descriptor so the background thread can call the
+    // blocking lock_exclusive() without borrowing from the caller.
+    let file_dup = file.try_clone().context("Failed to duplicate lock fd")?;
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let result = file_dup.lock_exclusive();
+        // If the receiver has been dropped (timeout elapsed), release the
+        // lock we just acquired so we don't hold it indefinitely.
+        if tx.send(result).is_err() {
+            let _ = file_dup.unlock();
+        }
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(err)) => Err(err).context("Failed to acquire exclusive lock"),
+        Err(mpsc::RecvTimeoutError::Timeout) => Ok(false),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            anyhow::bail!("Lock thread terminated unexpectedly")
+        }
+    }
 }
 
 fn resolve_vars_json(account_id: &str, input: &str) -> Result<String> {
@@ -639,11 +662,11 @@ fn write_cached_output_macos(account_id: &str, kind: CacheKind, output: &str) ->
     Ok(())
 }
 
-fn open_global_lock_file() -> Result<std::fs::File> {
+fn open_lock_file_for_account(account_id: &str) -> Result<std::fs::File> {
     use std::fs::OpenOptions;
 
     ensure_cache_dir()?;
-    let lock_path = global_lock_path()?;
+    let lock_path = lock_path_for_account(account_id)?;
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -1241,12 +1264,10 @@ mod config_tests {
         );
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unknown config key")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown config key"));
     }
 
     #[test]

@@ -44,8 +44,11 @@ pub fn cache_file_for_account(account_id: &str, kind: CacheKind) -> Result<PathB
     Ok(cache_path_for_account(&cache_dir()?, account_id, kind))
 }
 
-pub fn global_lock_path() -> Result<PathBuf> {
-    Ok(cache_dir()?.join("op_inject_global.lock"))
+pub fn lock_path_for_account(account_id: &str) -> Result<PathBuf> {
+    Ok(cache_dir()?.join(format!(
+        "op_inject_{}.lock",
+        sanitize_account_id(account_id)
+    )))
 }
 
 pub fn remove_cache_for_account(account_id: &str) -> Result<CacheRemoval> {
