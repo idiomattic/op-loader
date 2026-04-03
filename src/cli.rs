@@ -638,6 +638,7 @@ fn write_cached_output_macos(account_id: &str, kind: CacheKind, output: &str) ->
 
     ensure_cache_dir()?;
     let path = cache_file_for_account(account_id, kind)?;
+    let tmp_path = path.with_extension("cache.tmp");
 
     let encrypted = encrypt_cache(output.as_bytes())?;
 
@@ -645,20 +646,39 @@ fn write_cached_output_macos(account_id: &str, kind: CacheKind, output: &str) ->
         .create(true)
         .write(true)
         .truncate(true)
-        .open(&path)
-        .with_context(|| format!("Failed to open cache file for writing: {}", path.display()))?;
+        .open(&tmp_path)
+        .with_context(|| {
+            format!(
+                "Failed to open temp cache file for writing: {}",
+                tmp_path.display()
+            )
+        })?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = file.metadata()?.permissions();
         perms.set_mode(0o600);
-        std::fs::set_permissions(&path, perms)
-            .with_context(|| format!("Failed to set cache file permissions: {}", path.display()))?;
+        std::fs::set_permissions(&tmp_path, perms).with_context(|| {
+            format!(
+                "Failed to set cache file permissions: {}",
+                tmp_path.display()
+            )
+        })?;
     }
 
     file.write_all(encrypted.as_bytes())
-        .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
+        .with_context(|| format!("Failed to write temp cache file: {}", tmp_path.display()))?;
+
+    // Flush to disk before rename to ensure readers see complete data.
+    file.sync_all()
+        .with_context(|| format!("Failed to sync temp cache file: {}", tmp_path.display()))?;
+    drop(file);
+
+    // Atomic rename: readers either see the old file or the new complete file.
+    std::fs::rename(&tmp_path, &path)
+        .with_context(|| format!("Failed to rename temp cache to {}", path.display()))?;
+
     Ok(())
 }
 
