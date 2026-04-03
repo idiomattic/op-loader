@@ -240,12 +240,6 @@ pub fn handle_env_injection(cache_ttl: Option<&str>, cache_lock_wait: Option<&st
 
     let vars_by_account = group_vars_by_account(&config.inject_vars);
 
-    let mut combined_output = String::new();
-    let mut resolved_vars_by_account: std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, String>,
-    > = std::collections::HashMap::new();
-
     #[cfg(not(target_os = "macos"))]
     if cache_ttl.is_some() {
         anyhow::bail!("Cache is only supported on macOS.");
@@ -255,24 +249,58 @@ pub fn handle_env_injection(cache_ttl: Option<&str>, cache_lock_wait: Option<&st
     let cache_lock_wait =
         parse_duration(cache_lock_wait.unwrap_or("5s"))?.unwrap_or_else(|| Duration::from_secs(5));
 
-    for (account_id, vars) in vars_by_account {
-        let mut input = String::new();
-        for (env_var_name, var_config) in vars {
-            use std::fmt::Write;
-            writeln!(input, "{env_var_name}: {}", var_config.op_reference)
-                .with_context(|| "Failed to write env inject input")?;
-        }
+    // Build the input string for each account up front (cheap, no I/O).
+    let account_inputs: Vec<(&str, String)> = vars_by_account
+        .into_iter()
+        .map(|(account_id, vars)| {
+            let mut input = String::new();
+            for (env_var_name, var_config) in vars {
+                use std::fmt::Write;
+                writeln!(input, "{env_var_name}: {}", var_config.op_reference)
+                    .expect("write to String cannot fail");
+            }
+            (account_id, input)
+        })
+        .collect();
 
-        let resolved = match load_resolved_vars(account_id, &input, cache_ttl, cache_lock_wait) {
-            Ok(vars) => vars,
+    // Resolve all accounts in parallel — each thread acquires its own
+    // per-account lock, so different accounts never block each other.
+    let results: Vec<(String, Result<std::collections::HashMap<String, String>>)> =
+        std::thread::scope(|s| {
+            let handles: Vec<_> = account_inputs
+                .iter()
+                .map(|(account_id, input)| {
+                    let account_id = *account_id;
+                    s.spawn(move || {
+                        let result =
+                            load_resolved_vars(account_id, input, cache_ttl, cache_lock_wait);
+                        (account_id.to_string(), result)
+                    })
+                })
+                .collect();
+
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("account resolver thread panicked"))
+                .collect()
+        });
+
+    let mut combined_output = String::new();
+    let mut resolved_vars_by_account: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = std::collections::HashMap::new();
+
+    for (account_id, result) in results {
+        match result {
+            Ok(resolved) => {
+                combined_output.push_str(&format_exports(&resolved));
+                resolved_vars_by_account.insert(account_id, resolved);
+            }
             Err(err) => {
                 eprintln!("# Warning: Failed to inject secrets for account {account_id}: {err}");
-                continue;
             }
-        };
-
-        combined_output.push_str(&format_exports(&resolved));
-        resolved_vars_by_account.insert(account_id.to_string(), resolved);
+        }
     }
 
     print!("{combined_output}");
