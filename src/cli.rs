@@ -267,7 +267,7 @@ pub fn handle_env_injection(cache_ttl: Option<&str>, cache_lock_wait: Option<&st
     // per-account lock, so different accounts never block each other.
     let results: Vec<(String, Result<std::collections::HashMap<String, String>>)> =
         std::thread::scope(|s| {
-            let handles: Vec<_> = account_inputs
+            account_inputs
                 .iter()
                 .map(|(account_id, input)| {
                     let account_id = *account_id;
@@ -277,10 +277,6 @@ pub fn handle_env_injection(cache_ttl: Option<&str>, cache_lock_wait: Option<&st
                         (account_id.to_string(), result)
                     })
                 })
-                .collect();
-
-            handles
-                .into_iter()
                 .map(|h| h.join().expect("account resolver thread panicked"))
                 .collect()
         });
