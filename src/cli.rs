@@ -14,8 +14,8 @@ use crate::app::{InjectVarConfig, OpLoadConfig, TemplatedFile};
 #[cfg(target_os = "macos")]
 use crate::cache::cache_file_for_account;
 use crate::cache::{
-    cache_dir, ensure_cache_dir, lock_path_for_account, remove_cache_for_account, CacheKind,
-    CacheRemoval,
+    CacheKind, CacheRemoval, cache_dir, ensure_cache_dir, lock_path_for_account,
+    remove_cache_for_account,
 };
 #[cfg(target_os = "macos")]
 use crate::keychain::{assert_keychain_available, delete_key, get_or_create_key};
@@ -1312,10 +1312,12 @@ mod config_tests {
         );
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unknown config key"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown config key")
+        );
     }
 
     #[test]
